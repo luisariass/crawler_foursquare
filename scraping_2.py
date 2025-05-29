@@ -7,7 +7,7 @@ import os
 import time
 
 # Cargar URLs o sitios a procesar
-urls_sitios = pd.read_csv('merge_sities.csv', sep=',')
+urls_sitios = pd.read_csv('merge_sities_bolivar.csv', sep=',')
 
 credentials = {}
 all_sitios = {}  # Cambiar a diccionario para organizar por municipio
@@ -31,6 +31,18 @@ def obtener_sitios_turisticos_playwright(page, url, carpeta_salida="sitios_turis
         # Esperar a que carguen los elementos
         page.wait_for_selector('.contentHolder', timeout=10000)
         
+        # Hacer clic en "Ver más resultados" si existe (equivalente al notebook)
+        while True:
+            try:
+                boton = page.query_selector('button:has-text("Ver más resultados")')
+                if boton:
+                    boton.click()
+                    page.wait_for_timeout(int(np.random.uniform(2000, 4000)))
+                else:
+                    break
+            except:
+                break
+        
         # Buscar todos los elementos que contienen información sobre sitios turísticos
         sitios = page.query_selector_all('.contentHolder')
         
@@ -44,9 +56,6 @@ def obtener_sitios_turisticos_playwright(page, url, carpeta_salida="sitios_turis
                     "categoria": "N/A",
                     "direccion": "N/A",
                     "url_sitio": "",
-                    "usuario_reseña": "N/A",
-                    "fecha_reseña": "N/A",
-                    "contenido_reseña": "N/A",
                     "fecha_extraccion": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
                 
@@ -81,33 +90,6 @@ def obtener_sitios_turisticos_playwright(page, url, carpeta_salida="sitios_turis
                 direccion_element = sitio.query_selector('.venueAddress')
                 if direccion_element:
                     sitio_data["direccion"] = direccion_element.inner_text().strip()
-                
-                # Extraer información de reseña
-                reseña_element = sitio.query_selector('.tipText')
-                if reseña_element:
-                    # Extraer autor de la reseña
-                    author_element = reseña_element.query_selector('.tipAuthor')
-                    if author_element:
-                        usuario_element = author_element.query_selector('.userName')
-                        if usuario_element:
-                            sitio_data["usuario_reseña"] = usuario_element.inner_text().strip()
-                        
-                        # Extraer fecha (texto completo del autor menos el nombre de usuario)
-                        full_author_text = author_element.inner_text().strip()
-                        user_text = sitio_data["usuario_reseña"]
-                        potential_date_text = full_author_text.replace(user_text, '', 1).strip()
-                        if potential_date_text.startswith('•'):
-                            sitio_data["fecha_reseña"] = potential_date_text[1:].strip()
-                        else:
-                            sitio_data["fecha_reseña"] = potential_date_text
-                    
-                    # Extraer contenido de la reseña
-                    full_tip_text = reseña_element.inner_text().strip()
-                    if author_element:
-                        author_text = author_element.inner_text().strip()
-                        sitio_data["contenido_reseña"] = full_tip_text.replace(author_text, '', 1).strip()
-                    else:
-                        sitio_data["contenido_reseña"] = full_tip_text
                 
                 sitios_list.append(sitio_data)
                 
@@ -220,7 +202,6 @@ try:
                 
                 for sitio in sitios_encontrados:
                     if sitio.get('url_sitio', '') not in sitios_existentes_urls:
-                        sitio['fuente_url'] = url
                         sitio['municipio'] = municipio
                         sitio['indice_procesamiento'] = idx + 1
                         sitios_nuevos.append(sitio)
@@ -260,7 +241,7 @@ try:
                 save_all_data()
                 page.wait_for_timeout(int(np.random.uniform(30_000, 40_000)))
             
-            # Espera entre URLs
+            # Espera entre URLs (comportamiento humano)
             page.wait_for_timeout(int(np.random.uniform(15_000, 25_000)))
 
 except Exception as e:
