@@ -2,3 +2,6 @@ venv
 sitios_turisticos
 .gitignore
 credentials.txt
+*.csv
+*.xlsx
+*.json
