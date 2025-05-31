@@ -5,3 +5,5 @@ credentials.txt
 *.csv
 *.xlsx
 *.json
+*.ipynb
+*\__pycache__
