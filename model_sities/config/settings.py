@@ -17,6 +17,9 @@ class Settings:
     CSV_URLS_FILE = os.path.join(DATA_DIR, "merge_sities_bolivar.csv")
     OUTPUT_DIR = os.path.join(BASE_DIR, "sitios_turisticos_bolivar")
     
+    SITIES_ATLANTICO_CSV = os.path.join(DATA_DIR, "sities_atlantico.csv")
+    SITIES_BOLIVAR_CSV = os.path.join(DATA_DIR, "sities_bolivar.csv")
+    
     # URLs de Foursquare
     BASE_URL = "https://es.foursquare.com"
     LOGIN_URL = f"{BASE_URL}/login"
