@@ -44,6 +44,17 @@ class FoursquareReviewsExtractor:
         page.goto(url)
         page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_MEDIUM_MIN, Settings.WAIT_MEDIUM_MAX)))
 
+        # --- Detector de bloqueo por Foursquare ---
+        if "Sorry! We're having technical difficulties." in page.content():
+            print("Bloqueo detectado. Pausando scraping por 10 minutos...")
+            page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_EXTRA_LONG_MIN, Settings.WAIT_EXTRA_LONG_MAX)) * 15)  # 10 minutos aprox
+            page.reload()
+            page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_MEDIUM_MIN, Settings.WAIT_MEDIUM_MAX)))
+            # Reintentar una vez
+            if "Sorry! We're having technical difficulties." in page.content():
+                print("El bloqueo persiste. Saltando este sitio.")
+                return []
+
         # Intentar hacer clic en el filtro "Recientes" si existe
         try:
             recientes_btn = page.query_selector('//span[contains(@class, "sortLink") and contains(text(), "Recientes")]')
