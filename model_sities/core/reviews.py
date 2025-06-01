@@ -6,6 +6,24 @@ from playwright.sync_api import Page
 from config.settings import Settings
 from utils.helpers import current_timestamp
 
+PROGRESO_PATH = "progreso_reseñas.json"
+
+def guardar_progreso(idx_actual, csv_path, sitios_bloqueados):
+    progreso = {
+        "csv_path": csv_path,
+        "idx_actual": idx_actual,
+        "sitios_bloqueados": sitios_bloqueados
+    }
+    with open(PROGRESO_PATH, "w", encoding="utf-8") as f:
+        json.dump(progreso, f, ensure_ascii=False, indent=4)
+    print(f"Progreso guardado en {PROGRESO_PATH}")
+
+def cargar_progreso():
+    if os.path.exists(PROGRESO_PATH):
+        with open(PROGRESO_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
 class FoursquareReviewsExtractor:
     """
     Extrae reseñas de sitios turísticos usando Playwright, leyendo URLs desde archivos CSV.
@@ -16,44 +34,56 @@ class FoursquareReviewsExtractor:
         os.makedirs(self.output_dir, exist_ok=True)
 
     def extract_reviews_from_csv(self, page: Page, csv_path):
-        """
-        Extrae reseñas para cada sitio listado en el archivo CSV.
-        """
         df = pd.read_csv(csv_path)
-        # Puedes ajustar aquí si quieres más columnas
-        for _, row in df.iterrows():
-            url = row.get("url_sitio")
-            nombre = row.get("nombre", "sitio")
-            municipio = row.get("municipio", "desconocido")
+        progreso = cargar_progreso()
+        start_idx = 0
+
+        if progreso and progreso["csv_path"] == csv_path:
+            start_idx = progreso["idx_actual"]
+            print(f"Reanudando desde el sitio {start_idx} en {csv_path}")
+
+        for idx, row in enumerate(df.itertuples(), start=0):
+            if idx < start_idx:
+                continue
+
+            url = getattr(row, "url_sitio", None)
+            nombre = getattr(row, "nombre", f"sitio_{idx}")
+            municipio = getattr(row, "municipio", "desconocido")
             if not isinstance(url, str) or not url.startswith("http"):
                 continue
+
+            print(f"Extrayendo reseñas de: {nombre} ({url})")
+            reviews = self._extract_reviews_from_site(page, url, nombre)
+
+            if reviews == "BLOQUEADO":
+                print("Bloqueo detectado. Guardando progreso y deteniendo el scraper.")
+                guardar_progreso(idx, csv_path, [])
+                return  # Detener el scraper aquí
+
+            # --- GUARDAR LAS RESEÑAS EXTRAÍDAS ---
             ciudad_dir = os.path.join(self.output_dir, municipio)
             os.makedirs(ciudad_dir, exist_ok=True)
             nombre_archivo = f"reseñas_sitio_{nombre.replace(' ', '_').replace('/', '_')}.json"
             path_out = os.path.join(ciudad_dir, nombre_archivo)
-            print(f"Extrayendo reseñas de: {nombre} ({url})")
-            reviews = self._extract_reviews_from_site(page, url, nombre)
             with open(path_out, "w", encoding="utf-8") as f_out:
                 json.dump(reviews, f_out, ensure_ascii=False, indent=4)
             print(f"  Reseñas guardadas en: {path_out}")
 
+            # --- GUARDAR PROGRESO DESPUÉS DE CADA SITIO ---
+            guardar_progreso(idx + 1, csv_path, [])
+
     def _extract_reviews_from_site(self, page: Page, url: str, nombre_sitio: str):
-        """
-        Extrae reseñas de un sitio específico usando Playwright.
-        """
         page.goto(url)
         page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_MEDIUM_MIN, Settings.WAIT_MEDIUM_MAX)))
-
-        # --- Detector de bloqueo por Foursquare ---
+        # Detector de bloqueo
         if "Sorry! We're having technical difficulties." in page.content():
             print("Bloqueo detectado. Pausando scraping por 10 minutos...")
-            page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_EXTRA_LONG_MIN, Settings.WAIT_EXTRA_LONG_MAX)) * 15)  # 10 minutos aprox
+            page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_EXTRA_LONG_MIN, Settings.WAIT_EXTRA_LONG_MAX)) * 5)  # 10 minutos aprox
             page.reload()
             page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_MEDIUM_MIN, Settings.WAIT_MEDIUM_MAX)))
-            # Reintentar una vez
             if "Sorry! We're having technical difficulties." in page.content():
-                print("El bloqueo persiste. Saltando este sitio.")
-                return []
+                print("El bloqueo persiste tras la pausa.")
+                return "BLOQUEADO"
 
         # Intentar hacer clic en el filtro "Recientes" si existe
         try:
@@ -86,4 +116,3 @@ class FoursquareReviewsExtractor:
             reviews.append(review)
         print(f"  Total reseñas extraídas: {len(reviews)}")
         return reviews
-    
