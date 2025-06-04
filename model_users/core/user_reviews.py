@@ -1,19 +1,42 @@
-# ...existing imports...
 import os
 import json
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from playwright.sync_api import Page
+from playwright.sync_api import sync_playwright
 from config.settings import Settings
 from utils.helpers import guardar_progreso, cargar_progreso, save_log_error
 from utils.cookies_helper import cargar_cookies_playwright
+
+def process_user(info):
+    """
+    Función para ser ejecutada en paralelo por cada usuario.
+    """
+    with sync_playwright() as p:
+        browser = getattr(p, Settings.BROWSER_TYPE).launch(headless=Settings.HEADLESS)
+        page = browser.new_page()
+        if not cargar_cookies_playwright(page, Settings.COOKIES_PATH):
+            print("Error cargando cookies")
+            browser.close()
+            return info['url_usuario'].split('/')[-1], False
+        extractor = UserReviewsExtractor()
+        resultado = extractor._extract_reviews_from_user(page, info)
+        user_id = info['url_usuario'].split('/')[-1]
+        if resultado["tips"]:
+            tips_path = os.path.join(Settings.TIPS_DIR, f'tips_{user_id}.json')
+            users_path = os.path.join(Settings.USERS_DIR, f'user_{user_id}.json')
+            with open(tips_path, 'w', encoding='utf-8') as file:
+                json.dump(resultado["tips"], file, ensure_ascii=False, indent=4)
+            with open(users_path, 'w', encoding='utf-8') as file:
+                json.dump(resultado["user_info"], file, ensure_ascii=False, indent=4)
+        browser.close()
+        return user_id, True
 
 class UserReviewsExtractor:
     def __init__(self):
         Settings.create_output_dirs()
 
-    def extract_reviews_from_csv(self, page: Page, csv_path: str) -> None:
+    def extract_reviews_from_csv(self, csv_path: str, max_workers: int = 4) -> None:
         try:
             df = pd.read_csv(csv_path, sep=',')
         except Exception as e:
@@ -36,29 +59,19 @@ class UserReviewsExtractor:
 
         print(f"Total de usuarios pendientes: {len(usuarios_pendientes)}")
 
-        page.goto('https://es.foursquare.com/')
-        page.wait_for_timeout(np.random.uniform(3000, 5000))
+        from concurrent.futures import ProcessPoolExecutor, as_completed
 
-        for idx, info in enumerate(usuarios_pendientes):
-            user_id = info['url_usuario'].split('/')[-1]
-            if user_id in processed_user_ids:
-                print(f"Usuario {user_id} ya procesado, saltando...")
-                continue
-            resultado = self._extract_reviews_from_user(page, info)
-            if resultado["tips"]:
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                tips_path = os.path.join(Settings.TIPS_DIR, f'tips_{user_id}.json')
-                users_path = os.path.join(Settings.USERS_DIR, f'user_{user_id}.json')
-                with open(tips_path, 'w', encoding='utf-8') as file:
-                    json.dump(resultado["tips"], file, ensure_ascii=False, indent=4)
-                with open(users_path, 'w', encoding='utf-8') as file:
-                    json.dump(resultado["user_info"], file, ensure_ascii=False, indent=4)
-            processed_user_ids.add(user_id)
-            guardar_progreso(start_idx + idx + 1, processed_user_ids)
-            page.wait_for_timeout(int(np.random.uniform(20000, 30000)))
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_user, info): info for info in usuarios_pendientes}
+            for idx, future in enumerate(as_completed(futures)):
+                user_id, success = future.result()
+                processed_user_ids.add(user_id)
+                guardar_progreso(start_idx + idx + 1, processed_user_ids)
+                print(f"Usuario {user_id} procesado. Éxito: {success}")
+
         print("Todos los usuarios han sido procesados")
 
-    def _extract_reviews_from_user(self, page: Page, info: dict) -> dict:
+    def _extract_reviews_from_user(self, page, info: dict) -> dict:
         url = info['url_usuario']
         user_id = url.split('/')[-1]
         user_info = {'user': info['nombre_usuario'], 'user_id': user_id}
