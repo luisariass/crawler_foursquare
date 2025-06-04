@@ -1,19 +1,24 @@
-FROM python:3.13-slim
-
-# Instala dependencias del sistema para Playwright
-RUN apt-get update && apt-get install -y wget gnupg libnss3 libatk-bridge2.0-0 libgtk-3-0 libxss1 libasound2 libgbm1 libxshmfence1 libxcomposite1 libxdamage1 libxrandr2 libu2f-udev libvulkan1 fonts-liberation libappindicator3-1 xdg-utils
+FROM mcr.microsoft.com/playwright/python:v1.52.0-jammy
 
 WORKDIR /app
 
-# Copia solo los archivos necesarios
-COPY scraping.py ./
+# Copiar primero los archivos de configuración y dependencias
 COPY requirements.txt ./
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Copiar datos y archivos de configuración
+COPY merge_user_altlantico_bolivar_no_duplicates.csv ./
+COPY progreso_resenas_usuarios.json ./
 COPY cookies_foursquare.json ./
 
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+# Copiar código fuente
+COPY scraping_parallel.py ./
 
-# Instala navegadores de Playwright
-RUN python -m playwright install --with-deps
+# Crear directorio para resultados
+RUN mkdir -p /app/resultados/tips /app/resultados/users
 
-CMD ["python", "scraping.py"]
+# Verificar que los archivos existan
+RUN ls -la /app/
+
+CMD ["python", "scraping_parallel.py"]
