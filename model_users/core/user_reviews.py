@@ -1,3 +1,4 @@
+# ...existing imports...
 import os
 import json
 import pandas as pd
@@ -46,9 +47,8 @@ class UserReviewsExtractor:
             resultado = self._extract_reviews_from_user(page, info)
             if resultado["tips"]:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                nombre_usuario = info['nombre_usuario'].replace(' ', '_').replace('/', '_')
-                tips_path = os.path.join(Settings.TIPS_DIR, f'tips_{nombre_usuario}_{user_id}.json')
-                users_path = os.path.join(Settings.USERS_DIR, f'user_{nombre_usuario}_{user_id}.json')
+                tips_path = os.path.join(Settings.TIPS_DIR, f'tips_{user_id}.json')
+                users_path = os.path.join(Settings.USERS_DIR, f'user_{user_id}.json')
                 with open(tips_path, 'w', encoding='utf-8') as file:
                     json.dump(resultado["tips"], file, ensure_ascii=False, indent=4)
                 with open(users_path, 'w', encoding='utf-8') as file:
