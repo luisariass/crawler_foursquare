@@ -6,7 +6,7 @@ def main():
     parser = argparse.ArgumentParser(description='Extractor de reseñas de usuarios de Foursquare')
     parser.add_argument('--csv', type=str, default=Settings.USERS_CSV,
                         help='Ruta al archivo CSV con información de usuarios')
-    parser.add_argument('--max-workers', type=int, default=4,
+    parser.add_argument('--max-workers', type=int, default=2,
                         help='Número de procesos paralelos')
     args = parser.parse_args()
 

@@ -2,7 +2,6 @@ import os
 import json
 import pandas as pd
 import numpy as np
-from datetime import datetime
 from playwright.sync_api import sync_playwright
 from config.settings import Settings
 from utils.helpers import guardar_progreso, cargar_progreso, save_log_error
@@ -36,7 +35,7 @@ class UserReviewsExtractor:
     def __init__(self):
         Settings.create_output_dirs()
 
-    def extract_reviews_from_csv(self, csv_path: str, max_workers: int = 4) -> None:
+    def extract_reviews_from_csv(self, csv_path: str, max_workers: int = 2) -> None:
         try:
             df = pd.read_csv(csv_path, sep=',')
         except Exception as e:
