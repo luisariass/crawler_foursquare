@@ -1,9 +1,10 @@
 venv
 sitios_turisticos
-.gitignore
+*\.gitignore
 credentials.txt
 *.csv
 *.xlsx
 *.json
 *.ipynb
 *\__pycache__
+*\bloqueos_html
