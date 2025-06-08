@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 from playwright.sync_api import Page
 from config.settings import Settings
-from utils.helpers import current_timestamp
 
 PROGRESO_PATH = "progreso_reseñas.json"
 
@@ -30,6 +29,7 @@ class FoursquareReviewsExtractor:
     """
 
     def __init__(self, output_dir="reseñas_sitios"):
+        self.settings = Settings()
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
 
