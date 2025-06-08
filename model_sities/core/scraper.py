@@ -3,7 +3,7 @@ Clase principal para realizar scraping en Foursquare
 """
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from playwright.sync_api import Page
 from config.settings import Settings
 from utils.helpers import current_timestamp
