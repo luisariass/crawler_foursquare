@@ -2,7 +2,7 @@
 Funciones auxiliares para el scraper
 """
 import time
-from typing import Dict, Any
+from typing import Dict
 
 def current_timestamp() -> str:
     """Devuelve la fecha y hora actual como string"""
