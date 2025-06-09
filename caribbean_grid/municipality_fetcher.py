@@ -2,9 +2,11 @@ import requests
 import pandas as pd
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 CARIBBEAN_DEPARTMENTS = [
-    "Atlántico", "Bolívar"
+    #"Atlántico", "Bolívar", 
+    "Sucre"
 ]
 
 def fetch_municipalities_overpass(department_name, sleep_time=1.5):
@@ -31,13 +33,15 @@ def fetch_municipalities_overpass(department_name, sleep_time=1.5):
             muni_name = element['tags'].get('name', 'Unknown')
             lat = element['center']['lat']
             lon = element['center']['lon']
+            # Generar URL usando 'near' (más robusto para Foursquare)
+            near_param = quote(f"{muni_name}, {department_name}, Colombia")
+            url_municipio = f"https://es.foursquare.com/explore?near={near_param}"
             results.append({
                 'municipio': muni_name,
                 'departamento': department_name,
                 'latitude': lat,
                 'longitude': lon,
-                #'url_municipio': f"https://es.foursquare.com/explore?ll={lat},{lon}&radius=1000",
-                'url_municipio_detalle': f"https://es.foursquare.com/explore?mode=url&ne={lat}%2C{lon}&sw={lat}%2C{lon}"
+                'url_municipio': url_municipio
             })
     time.sleep(sleep_time)  # Para no saturar la API
     return results
