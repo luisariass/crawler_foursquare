@@ -5,4 +5,4 @@ CARIBBEAN_DEPARTMENTS = [
 ]
 
 API_URL = "https://www.datos.gov.co/resource/gdxc-w37w.json"
-DEFAULT_OUTPUT_DIR = "municipios_csv"
+DEFAULT_OUTPUT_DIR = "caribbean_grid/data/"
