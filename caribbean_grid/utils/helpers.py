@@ -8,8 +8,8 @@ def save_municipalities_to_csv(municipalities, department, output_dir):
     for m in municipalities:
         municipio = m['nom_mpio'].strip().title()
         departamento = m['dpto'].strip().title()
-        lat = m['latitud'].replace(',', '.') if 'latitud' in m else ''
-        lon = m['longitud'].replace(',', '.') if 'longitud' in m else ''
+        lat = m.get('latitud', '').replace(',', '.')
+        lon = m.get('longitud', '').replace(',', '.')
         url_municipio = f"https://es.foursquare.com/explore?near={quote(municipio + ', ' + departamento + ', Colombia')}"
         rows.append({
             "municipio": municipio,
