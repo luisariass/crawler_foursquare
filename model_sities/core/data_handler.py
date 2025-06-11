@@ -3,7 +3,7 @@ Gestión y almacenamiento de datos extraídos
 """
 import os
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from config.settings import Settings
 from utils.helpers import current_timestamp
 
@@ -12,7 +12,7 @@ class DataHandler:
     
     def __init__(self, output_dir: str = None):
         """Inicializa el gestor de datos"""
-        self.output_dir = output_dir or Settings.SITIES_OUTPUT_DIR
+        self.output_dir = output_dir or Settings.OUTPUT_DIR
         self.all_sitios: Dict[str, List[Dict]] = {}
         self.processed_urls: Dict[str, Dict] = {}
         self._ensure_output_dir()

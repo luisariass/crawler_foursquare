@@ -2,7 +2,6 @@
 Configuración para el scraper de Foursquare
 """
 import os
-import glob
 
 # Ruta base del proyecto (carpeta model_sities)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -10,18 +9,16 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Ruta a la carpeta de datos
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-# Ruta a los CSVs generados por caribbean_grid
-CARIBBEAN_CSV_DIR = os.path.join(os.path.dirname(BASE_DIR), "caribbean_grid", "data")
-
 class Settings:
     """Configuración centralizada para el scraper"""
     
     # Archivos y directorios con rutas absolutas
-    COOKIES_JSON = os.path.join(DATA_DIR, "cookies_foursquare.json")
-    SITIES_OUTPUT_DIR = os.path.join(BASE_DIR, "sitios_turisticos")
-    REVIEWS_OUTPUT_DIR = os.path.join(BASE_DIR, "reseñas_sitios")
-    PROGRESO_PATH = os.path.join(REVIEWS_OUTPUT_DIR, "progreso_reseñas.json")
-
+    CREDENTIALS_FILE = os.path.join(DATA_DIR, "credentials.txt")
+    CSV_URLS_FILE = os.path.join(DATA_DIR, "merge_sities_bolivar.csv")
+    OUTPUT_DIR = os.path.join(BASE_DIR, "sitios_turisticos_bolivar")
+    
+    SITIES_ATLANTICO_CSV = os.path.join(DATA_DIR, "sities_atlantico.csv")
+    SITIES_BOLIVAR_CSV = os.path.join(DATA_DIR, "sities_bolivar.csv")
     
     # URLs de Foursquare
     BASE_URL = "https://es.foursquare.com"
@@ -58,14 +55,9 @@ class Settings:
     }
     
     @classmethod
-    def get_caribbean_csvs(cls):
-        """Devuelve la lista de archivos CSV generados por caribbean_grid"""
-        return glob.glob(os.path.join(CARIBBEAN_CSV_DIR, "*.csv"))
-    
-    @classmethod
     def validate_files(cls):
         """Verifica que los archivos necesarios existan"""
-        files_to_check = [cls.CREDENTIALS_FILE]
+        files_to_check = [cls.CREDENTIALS_FILE, cls.CSV_URLS_FILE]
         missing_files = []
         
         for file_path in files_to_check:

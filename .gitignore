@@ -8,4 +8,3 @@ credentials.txt
 *.ipynb
 *\__pycache__
 *\bloqueos_html
-*\__init__.py
