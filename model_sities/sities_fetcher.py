@@ -20,7 +20,7 @@ class FoursquareScraperApp:
         self.settings = Settings()
         self.auth = FoursquareAuth()
         self.scraper = FoursquareScraper()
-        self.data_handler = DataHandler(output_dir=self.settings.OUTPUT_DIR)
+        self.data_handler = DataHandler(output_dir=self.settings.SITIES_OUTPUT_DIR)
     
     def run(self, start_index: int = 0, end_index: int = None, process_all: bool = False) -> bool:
         """

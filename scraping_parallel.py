@@ -4,18 +4,18 @@ import pandas as pd
 import json
 import numpy as np
 import os
-import time
-import random
 
 # Configuraciones globales
 RESULTADOS_DIR = "resultados"
 TIPS_DIR = os.path.join(RESULTADOS_DIR, "tips")
 USERS_DIR = os.path.join(RESULTADOS_DIR, "users")
-PROGRESO_PATH = "progreso_reseñas_usuarios.json"
+LOGS_ERROR_DIR = "logs_error"  # Nueva carpeta para logs de error
+PROGRESO_PATH = "progreso_resenas_usuarios.json"
 TAMAÑO_LOTE = 10  # Puedes ajustar este valor si quieres procesar en lotes
 
 os.makedirs(TIPS_DIR, exist_ok=True)
 os.makedirs(USERS_DIR, exist_ok=True)
+os.makedirs(LOGS_ERROR_DIR, exist_ok=True)  # Crear carpeta de logs de error
 
 def guardar_progreso(idx_actual, processed_user_ids):
     with open(PROGRESO_PATH, "w", encoding="utf-8") as f:
@@ -37,6 +37,23 @@ def cargar_cookies_playwright(page, cookies_path="cookies_foursquare.json"):
     page.context.add_cookies(cookies)
     print("Cookies cargadas correctamente.")
     return True
+
+def save_log_error(info):
+    """
+    Guarda la información del usuario en la carpeta logs_error si no se encontró el botón 'Ver todos los tips'.
+    """
+    user_id = info['url_usuario'].split('/')[-1]
+    nombre_usuario = info['nombre_usuario'].replace(' ', '_').replace('/', '_')
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    error_filename = f'error_{nombre_usuario}_{user_id}_{timestamp}.json'
+    error_path = os.path.join(LOGS_ERROR_DIR, error_filename)
+    with open(error_path, 'w', encoding='utf-8') as f:
+        json.dump({
+            "nombre_usuario": info['nombre_usuario'],
+            "user_id": user_id,
+            "url_usuario": info['url_usuario'],
+        }, f, ensure_ascii=False, indent=4)
+    print(f"Usuario con error guardado en: {error_path}")
 
 def extraer_tips_usuario(page, info, processed_user_ids):
     url = info['url_usuario']
@@ -62,6 +79,7 @@ def extraer_tips_usuario(page, info, processed_user_ids):
     see_all = see_all[-1] if see_all else None
     if not see_all:
         print(f"Error: No se encontró el botón 'Ver todos los tips' para {info['nombre_usuario']}")
+        save_log_error(info)  # Guardar el usuario en logs_error
         return {"user_info": user_info, "tips": []}
     max_intentos = 3
     for intento in range(max_intentos):
