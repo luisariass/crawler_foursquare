@@ -5,8 +5,8 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
 from playwright.sync_api import Page
-from config.settings import Settings
-from utils.helpers import current_timestamp
+from ..config.settings import Settings
+from ..utils.helpers import current_timestamp
 
 class FoursquareScraper:
     """Realiza el scraping de sitios turísticos en Foursquare"""
@@ -15,47 +15,46 @@ class FoursquareScraper:
         """Inicializa el scraper"""
         self.settings = Settings()
     
-    def load_urls_from_csv(self, csv_file: str = None) -> pd.DataFrame:
-        """Carga las URLs desde un archivo CSV"""
-        csv_path = csv_file or self.settings.CSV_URLS_FILE
-        try:
-            df = pd.read_csv(csv_path, sep=',')
-            print(f"Cargadas {len(df)} URLs desde {csv_path}")
-            return df
-        except Exception as e:
-            print(f"Error al cargar el archivo CSV {csv_path}: {e}")
-            return pd.DataFrame()
+    def load_urls_from_csvs(self, csv_files: list) -> 'pd.DataFrame':
+        """Carga y concatena las URLs desde una lista de archivos CSV"""
+        frames = []
+        for csv_path in csv_files:
+            try:
+                df = pd.read_csv(csv_path, sep=',')
+                print(f"Cargadas {len(df)} URLs desde {csv_path}")
+                frames.append(df)
+            except Exception as e:
+                print(f"Error al cargar el archivo CSV {csv_path}: {e}")
+        if frames:
+            return pd.concat(frames, ignore_index=True)
+        return pd.DataFrame()
     
-    def extract_sites(self, page: Page, url: str) -> List[Dict[str, Any]]:
-        """Extrae sitios turísticos de una página de Foursquare"""
+    def extract_sites(self, page: Page, url: str, municipio_esperado: str = None) -> List[Dict[str, Any]]:
+        """Extrae sitios turísticos de una página de Foursquare, filtrando por municipio si se indica"""
         try:
             # Navegar a la URL
             page.goto(url)
             page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_MEDIUM_MIN, Settings.WAIT_MEDIUM_MAX)))
             
-            # Lista para almacenar los sitios turísticos
             sitios_list = []
-            
-            # Esperar a que carguen los elementos
             page.wait_for_selector(Settings.SELECTORS['content_holder'], timeout=10000)
-            
-            # Cargar todos los resultados disponibles
             self._load_all_results(page)
-            
-            # Buscar todos los elementos que contienen información sobre sitios turísticos
             sitios = page.query_selector_all(Settings.SELECTORS['content_holder'])
             
-            # Extraer información de cada sitio
             for i, sitio in enumerate(sitios):
                 try:
                     site_data = self._extract_site_data(sitio, i + 1)
+                    # FILTRO: solo incluir si la dirección contiene el municipio esperado
+                    if municipio_esperado:
+                        direccion = site_data.get("direccion", "").lower()
+                        if municipio_esperado.lower() not in direccion:
+                            continue  # descarta el sitio si no coincide el municipio
                     sitios_list.append(site_data)
                 except Exception as e:
                     print(f"Error al procesar sitio {i + 1}: {e}")
                     continue
             
             return sitios_list
-            
         except Exception as e:
             print(f"Error al acceder a la página {url}: {e}")
             return []
