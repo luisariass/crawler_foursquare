@@ -29,8 +29,8 @@ class Settings:
     LOGIN_URL = f"{BASE_URL}/login"
     
     # Configuración del navegador
-    BROWSER_TYPE = "firefox"  # firefox, chromium, webkit
-    HEADLESS = True
+    BROWSER_TYPE = "chromium"  # firefox, chromium, webkit 
+    HEADLESS = True # False = firefox con interfaz gráfica, True = sin interfaz gráfica
     
     # Tiempos de espera (en milisegundos)
     WAIT_SHORT_MIN = 1000
