@@ -1,6 +1,6 @@
 from playwright.sync_api import Page
-from config.settings import Settings
-from utils.cookies_helper import save_cookies, load_cookies
+from ..config.settings import Settings
+from ..utils.cookies_helper import save_cookies, load_cookies
 
 class FoursquareAuth:
     """Maneja la autenticación en Foursquare"""
