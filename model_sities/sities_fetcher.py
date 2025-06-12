@@ -3,6 +3,7 @@ Archivo principal que orquesta el proceso de scraping de Foursquare
 """
 import argparse
 import sys
+import os
 import numpy as np
 from playwright.sync_api import sync_playwright
 
@@ -22,16 +23,25 @@ class FoursquareScraperApp:
         self.scraper = FoursquareScraper()
         self.data_handler = DataHandler(output_dir=self.settings.SITIES_OUTPUT_DIR)
     
-    def run(self, start_index: int = 0, end_index: int = None, process_all: bool = False) -> bool:
+    def run(self, start_index: int = 0, end_index: int = None, process_all: bool = False, csv_files: list = None) -> bool:
         """
         Ejecuta el proceso principal de scraping
         """
         try:
-            # Cargar todos los CSVs generados por caribbean_grid
-            csv_files = self.settings.get_caribbean_csvs()
-            if not csv_files:
-                print("No se encontraron archivos CSV en caribbean_grid/data/. Abortando.")
-                return False
+            # Si se pasan archivos CSV específicos, úsalos; si no, usa todos los disponibles
+            if csv_files:
+                # Valida que los archivos existan
+                csv_files = [f for f in csv_files if os.path.isfile(f)]
+                if not csv_files:
+                    print("No se encontraron los archivos CSV especificados. Abortando.")
+                    return False
+            else:
+                csv_files = self.settings.get_caribbean_csvs()
+                if not csv_files:
+                    print("No se encontraron archivos CSV en caribbean_grid/data/. Abortando.")
+                    return False
+
+            print(f"Archivos CSV a procesar: {csv_files}")
             urls_data = self.scraper.load_urls_from_csvs(csv_files)
             
             if urls_data.empty:
@@ -65,8 +75,8 @@ class FoursquareScraperApp:
                         print(f"Procesando municipio: {municipio} - {url}")
                         
                         # Extraer sitios turísticos de la página
-                        #sitios_encontrados = self.scraper.extract_sites(page, url)
-                        sitios_encontrados = self.scraper.extract_sites(page, url, municipio)
+                        sitios_encontrados = self.scraper.extract_sites(page, url)
+                        #sitios_encontrados = self.scraper.extract_sites(page, url, municipio)
                         
                         if sitios_encontrados:
                             # Añadir sitios y obtener estadísticas
@@ -132,11 +142,12 @@ def main():
     parser.add_argument('--start', type=int, default=0, help='Índice de inicio para procesar URLs')
     parser.add_argument('--end', type=int, help='Índice final para procesar URLs')
     parser.add_argument('--all', action='store_true', help='Procesar todas las URLs')
-    
+    parser.add_argument('--csv', type=str, nargs='*', help='Ruta(s) de archivo(s) CSV a procesar')
+
     args = parser.parse_args()
     
     app = FoursquareScraperApp()
-    success = app.run(args.start, args.end, args.all)
+    success = app.run(args.start, args.end, args.all, csv_files=args.csv)
     
     if success:
         print("Scraping completado exitosamente!")
