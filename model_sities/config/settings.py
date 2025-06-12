@@ -10,6 +10,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Ruta a la carpeta de datos
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
+
 # Ruta a los CSVs generados por caribbean_grid
 CARIBBEAN_CSV_DIR = os.path.join(os.path.dirname(BASE_DIR), "caribbean_grid", "data")
 
@@ -18,9 +19,9 @@ class Settings:
     
     # Archivos y directorios con rutas absolutas
     COOKIES_JSON = os.path.join(DATA_DIR, "cookies_foursquare.json")
-    SITIES_OUTPUT_DIR = os.path.join(BASE_DIR, "sitios_turisticos")
-    REVIEWS_OUTPUT_DIR = os.path.join(BASE_DIR, "reseñas_sitios")
-    PROGRESO_PATH = os.path.join(REVIEWS_OUTPUT_DIR, "progreso_reseñas.json")
+    SITIES_OUTPUT_DIR = os.path.join(DATA_DIR, "sities")
+    REVIEWS_OUTPUT_DIR = os.path.join(DATA_DIR, "reviewers_sities")
+    PROGRESO_PATH = os.path.join(REVIEWS_OUTPUT_DIR, "progress_reviews.json")
 
     
     # URLs de Foursquare
@@ -29,7 +30,7 @@ class Settings:
     
     # Configuración del navegador
     BROWSER_TYPE = "firefox"  # firefox, chromium, webkit
-    HEADLESS = False
+    HEADLESS = True
     
     # Tiempos de espera (en milisegundos)
     WAIT_SHORT_MIN = 1000
@@ -61,22 +62,3 @@ class Settings:
     def get_caribbean_csvs(cls):
         """Devuelve la lista de archivos CSV generados por caribbean_grid"""
         return glob.glob(os.path.join(CARIBBEAN_CSV_DIR, "*.csv"))
-    
-    @classmethod
-    def validate_files(cls):
-        """Verifica que los archivos necesarios existan"""
-        files_to_check = [cls.CREDENTIALS_FILE]
-        missing_files = []
-        
-        for file_path in files_to_check:
-            if not os.path.exists(file_path):
-                missing_files.append(file_path)
-                
-        if missing_files:
-            print("ERROR: No se encontraron los siguientes archivos:")
-            for file in missing_files:
-                print(f"  - {file}")
-            return False
-            
-        print("✓ Todos los archivos necesarios encontrados")
-        return True
