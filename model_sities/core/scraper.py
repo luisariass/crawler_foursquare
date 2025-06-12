@@ -29,8 +29,8 @@ class FoursquareScraper:
             return pd.concat(frames, ignore_index=True)
         return pd.DataFrame()
     
-    def extract_sites(self, page: Page, url: str, municipio_esperado: str = None) -> List[Dict[str, Any]]:
-        """Extrae sitios turísticos de una página de Foursquare, filtrando por municipio si se indica"""
+    def extract_sites(self, page: Page, url: str) -> List[Dict[str, Any]]:
+        """Extrae sitios turísticos de una página de Foursquare"""
         try:
             # Navegar a la URL
             page.goto(url)
@@ -44,11 +44,6 @@ class FoursquareScraper:
             for i, sitio in enumerate(sitios):
                 try:
                     site_data = self._extract_site_data(sitio, i + 1)
-                    # FILTRO: solo incluir si la dirección contiene el municipio esperado
-                    if municipio_esperado:
-                        direccion = site_data.get("direccion", "").lower()
-                        if municipio_esperado.lower() not in direccion:
-                            continue  # descarta el sitio si no coincide el municipio
                     sitios_list.append(site_data)
                 except Exception as e:
                     print(f"Error al procesar sitio {i + 1}: {e}")
