@@ -1,8 +1,7 @@
-import os
 from playwright.sync_api import sync_playwright
-from core.auth import FoursquareAuth
-from core.reviews import FoursquareReviewsExtractor, cargar_progreso
-from config.settings import Settings
+from .core.auth import FoursquareAuth
+from .core.reviews import FoursquareReviewsExtractor, cargar_progreso
+from .config.settings import Settings
 
 def main():
     csv_files = [
