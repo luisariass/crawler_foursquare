@@ -6,11 +6,11 @@ import sys
 import numpy as np
 from playwright.sync_api import sync_playwright
 
-from config.settings import Settings
-from core.auth import FoursquareAuth
-from core.scraper import FoursquareScraper
-from core.data_handler import DataHandler
-from utils.helpers import print_progress
+from .config.settings import Settings
+from .core.auth import FoursquareAuth
+from .core.scraper import FoursquareScraper
+from .core.data_handler import DataHandler
+from .utils.helpers import print_progress
 
 class FoursquareScraperApp:
     """Aplicación principal para scraping de Foursquare"""
@@ -20,7 +20,7 @@ class FoursquareScraperApp:
         self.settings = Settings()
         self.auth = FoursquareAuth()
         self.scraper = FoursquareScraper()
-        self.data_handler = DataHandler(output_dir=self.settings.OUTPUT_DIR)
+        self.data_handler = DataHandler(output_dir=self.settings.SITIES_OUTPUT_DIR)
     
     def run(self, start_index: int = 0, end_index: int = None, process_all: bool = False) -> bool:
         """

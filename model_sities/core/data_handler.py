@@ -4,8 +4,8 @@ Gestión y almacenamiento de datos extraídos
 import os
 import json
 from typing import Dict, List, Any
-from config.settings import Settings
-from utils.helpers import current_timestamp
+from ..config.settings import Settings
+from ..utils.helpers import current_timestamp
 
 class DataHandler:
     """Maneja el almacenamiento y gestión de los datos extraídos"""
