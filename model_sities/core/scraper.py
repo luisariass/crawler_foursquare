@@ -21,10 +21,10 @@ class FoursquareScraper:
         for csv_path in csv_files:
             try:
                 df = pd.read_csv(csv_path, sep=',')
-                print(f"Cargadas {len(df)} URLs desde {csv_path}")
+                print(f"[INFO] {len(df)} URLs cargadas de {csv_path}")
                 frames.append(df)
             except Exception as e:
-                print(f"Error al cargar el archivo CSV {csv_path}: {e}")
+                print(f"[ERROR] No se pudo cargar {csv_path}: {e}")
         if frames:
             return pd.concat(frames, ignore_index=True)
         return pd.DataFrame()
@@ -32,7 +32,6 @@ class FoursquareScraper:
     def extract_sites(self, page: Page, url: str) -> List[Dict[str, Any]]:
         """Extrae sitios turísticos de una página de Foursquare"""
         try:
-            # Navegar a la URL
             page.goto(url)
             page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_MEDIUM_MIN, Settings.WAIT_MEDIUM_MAX)))
             
@@ -46,12 +45,13 @@ class FoursquareScraper:
                     site_data = self._extract_site_data(sitio, i + 1)
                     sitios_list.append(site_data)
                 except Exception as e:
-                    print(f"Error al procesar sitio {i + 1}: {e}")
+                    # Solo mostrar error resumido
+                    print(f"[WARN] Sitio {i + 1} no procesado.")
                     continue
             
             return sitios_list
         except Exception as e:
-            print(f"Error al acceder a la página {url}: {e}")
+            print(f"[WARN] No se pudo acceder a la página: {url}")
             return []
     
     def _load_all_results(self, page: Page) -> None:
@@ -65,7 +65,6 @@ class FoursquareScraper:
                 else:
                     break
         except Exception:
-            # Si hay algún error, simplemente continuar con los resultados cargados
             pass
     
     def _extract_site_data(self, sitio, index: int) -> Dict[str, Any]:
@@ -91,7 +90,6 @@ class FoursquareScraper:
             nombre_link = nombre_element.query_selector('a')
             if nombre_link:
                 sitio_data["nombre"] = nombre_link.inner_text().strip()
-                # Extraer URL del sitio
                 href = nombre_link.get_attribute('href')
                 if href:
                     if href.startswith('/'):

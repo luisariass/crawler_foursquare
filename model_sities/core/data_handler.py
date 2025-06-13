@@ -24,19 +24,10 @@ class DataHandler:
     def add_sites(self, municipio: str, sites: List[Dict], processing_index: int) -> Dict[str, int]:
         """
         Añade sitios a un municipio, evitando duplicados.
-        
-        Args:
-            municipio: Nombre del municipio
-            sites: Lista de sitios a añadir
-            processing_index: Índice de procesamiento
-            
-        Returns:
-            Estadísticas sobre los sitios añadidos
         """
         if municipio not in self.all_sitios:
             self.all_sitios[municipio] = []
         
-        # Obtener URLs existentes para evitar duplicados
         existing_urls = {sitio.get('url_sitio', '') for sitio in self.all_sitios[municipio]}
         new_sites = []
         
@@ -50,7 +41,6 @@ class DataHandler:
         
         self.all_sitios[municipio].extend(new_sites)
         
-        # Re-enumerar los IDs para mantener secuencia
         for i, site in enumerate(self.all_sitios[municipio]):
             site['id'] = i + 1
         
@@ -73,7 +63,6 @@ class DataHandler:
         if municipio not in self.all_sitios or not self.all_sitios[municipio]:
             return False
         
-        # Crear diccionario con todos los datos del municipio
         datos = {
             "municipio": municipio,
             "sitios_turisticos": self.all_sitios[municipio],
@@ -82,28 +71,23 @@ class DataHandler:
             "url_procesada": self.processed_urls.get(municipio, {})
         }
         
-        # Nombre del archivo por municipio
         archivo_municipio = os.path.join(self.output_dir, f'sitios_{municipio}.json')
         
         try:
-            # Guardar en JSON
             with open(archivo_municipio, 'w', encoding='utf-8') as file:
                 json.dump(datos, file, ensure_ascii=False, indent=4)
-            
-            print(f"Datos del municipio {municipio} guardados en {archivo_municipio}")
+            # Solo mostrar mensaje si hay error, no en cada guardado
             return True
         except Exception as e:
-            print(f"Error al guardar datos del municipio {municipio}: {e}")
+            print(f"[ERROR] No se pudo guardar datos de {municipio}: {e}")
             return False
     
     def save_all_data(self) -> bool:
         """Guarda los datos de todos los municipios procesados"""
         try:
-            # Guardar archivo individual por cada municipio
             for municipio in self.all_sitios.keys():
                 self.save_municipio_data(municipio)
             
-            # Crear resumen general
             total_sitios = sum(len(sitios) for sitios in self.all_sitios.values())
             resumen = {
                 "resumen_general": {
@@ -118,11 +102,10 @@ class DataHandler:
             archivo_resumen = os.path.join(self.output_dir, 'resumen_extraccion.json')
             with open(archivo_resumen, 'w', encoding='utf-8') as file:
                 json.dump(resumen, file, ensure_ascii=False, indent=4)
-            
-            print(f"Resumen general guardado en {archivo_resumen}")
+            print(f"[INFO] Resumen general guardado en {archivo_resumen}")
             return True
         except Exception as e:
-            print(f"Error al guardar todos los datos: {e}")
+            print(f"[ERROR] No se pudo guardar el resumen general: {e}")
             return False
     
     def get_statistics(self) -> Dict[str, Any]:
