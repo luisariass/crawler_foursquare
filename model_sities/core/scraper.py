@@ -3,10 +3,11 @@ Clase principal para realizar scraping en Foursquare
 """
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Any
+import time
+from typing import Dict, Any
 from playwright.sync_api import Page
-from config.settings import Settings
-from utils.helpers import current_timestamp
+from ..config.settings import Settings
+from ..utils.helpers import current_timestamp
 
 class FoursquareScraper:
     """Realiza el scraping de sitios turísticos en Foursquare"""
@@ -15,50 +16,65 @@ class FoursquareScraper:
         """Inicializa el scraper"""
         self.settings = Settings()
     
-    def load_urls_from_csv(self, csv_file: str = None) -> pd.DataFrame:
-        """Carga las URLs desde un archivo CSV"""
-        csv_path = csv_file or self.settings.CSV_URLS_FILE
-        try:
-            df = pd.read_csv(csv_path, sep=',')
-            print(f"Cargadas {len(df)} URLs desde {csv_path}")
-            return df
-        except Exception as e:
-            print(f"Error al cargar el archivo CSV {csv_path}: {e}")
-            return pd.DataFrame()
+    def load_urls_from_csvs(self, csv_files: list) -> 'pd.DataFrame':
+        """Carga y concatena las URLs desde una lista de archivos CSV"""
+        frames = []
+        for csv_path in csv_files:
+            try:
+                df = pd.read_csv(csv_path, sep=',')
+                print(f"[INFO] {len(df)} URLs cargadas de {csv_path}")
+                frames.append(df)
+            except Exception as e:
+                print(f"[ERROR] No se pudo cargar {csv_path}: {e}")
+        if frames:
+            return pd.concat(frames, ignore_index=True)
+        return pd.DataFrame()
     
-    def extract_sites(self, page: Page, url: str) -> List[Dict[str, Any]]:
-        """Extrae sitios turísticos de una página de Foursquare"""
-        try:
-            # Navegar a la URL
-            page.goto(url)
-            page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_MEDIUM_MIN, Settings.WAIT_MEDIUM_MAX)))
-            
-            # Lista para almacenar los sitios turísticos
-            sitios_list = []
-            
-            # Esperar a que carguen los elementos
-            page.wait_for_selector(Settings.SELECTORS['content_holder'], timeout=10000)
-            
-            # Cargar todos los resultados disponibles
-            self._load_all_results(page)
-            
-            # Buscar todos los elementos que contienen información sobre sitios turísticos
-            sitios = page.query_selector_all(Settings.SELECTORS['content_holder'])
-            
-            # Extraer información de cada sitio
-            for i, sitio in enumerate(sitios):
-                try:
-                    site_data = self._extract_site_data(sitio, i + 1)
-                    sitios_list.append(site_data)
-                except Exception as e:
-                    print(f"Error al procesar sitio {i + 1}: {e}")
-                    continue
-            
-            return sitios_list
-            
-        except Exception as e:
-            print(f"Error al acceder a la página {url}: {e}")
-            return []
+    def extract_sites(self, page, url, municipio="", max_retries=None, timeout=None) -> list:
+        max_retries = max_retries or Settings.SCRAPER_MAX_RETRIES
+        timeout = timeout or Settings.SCRAPER_TIMEOUT_MS
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"Intento {attempt} de {max_retries} para {municipio} ({url})")
+                page.goto(url, timeout=timeout)
+                page.wait_for_timeout(int(np.random.uniform(2000, 4000)))
+                # ... scraping real ...
+                sitios_list = []
+                page.wait_for_selector(Settings.SELECTORS['content_holder'], timeout=10000)
+                self._load_all_results(page)
+                sitios = page.query_selector_all(Settings.SELECTORS['content_holder'])
+                for i, sitio in enumerate(sitios):
+                    try:
+                        site_data = self._extract_site_data(sitio, i + 1)
+                        sitios_list.append(site_data)
+                    except Exception:
+                        print(f"[WARN] Sitio {i + 1} no procesado.")
+                        continue
+                return sitios_list
+            except Exception as e:
+                # Detecta bloqueo por Foursquare (puedes mejorar esta lógica)
+                error_str = str(e).lower()
+                if "429" in error_str or "captcha" in error_str or "blocked" in error_str:
+                    print(f"[BLOCKED] Bloqueo detectado para {municipio} ({url})")
+                    self.register_failed_municipality(municipio, url, "bloqueo")
+                    break  # No reintentes si es bloqueo
+                elif "timeout" in error_str:
+                    print(f"[TIMEOUT] Timeout para {municipio} ({url})")
+                    if attempt == max_retries:
+                        self.register_failed_municipality(municipio, url, "timeout")
+                else:
+                    print(f"[ERROR] Error en intento {attempt} para {municipio} ({url}): {e}")
+                if attempt < max_retries:
+                    wait_time = 10 * attempt
+                    print(f"Reintentando en {wait_time} segundos...")
+                    time.sleep(wait_time)
+        return []
+    def register_failed_municipality(self, municipio, url, reason):
+        failed_path = Settings.FAILED_MUNICIPALITIES_PATH
+        with open(failed_path, "a", encoding="utf-8") as f:
+            f.write(f"{municipio},{url},{reason}\n")
+        print(f"[FAILED] Municipio registrado: {municipio} ({url}) - Razón: {reason}")
     
     def _load_all_results(self, page: Page) -> None:
         """Hace clic en 'Ver más resultados' hasta que no haya más"""
@@ -71,7 +87,6 @@ class FoursquareScraper:
                 else:
                     break
         except Exception:
-            # Si hay algún error, simplemente continuar con los resultados cargados
             pass
     
     def _extract_site_data(self, sitio, index: int) -> Dict[str, Any]:
@@ -97,7 +112,6 @@ class FoursquareScraper:
             nombre_link = nombre_element.query_selector('a')
             if nombre_link:
                 sitio_data["nombre"] = nombre_link.inner_text().strip()
-                # Extraer URL del sitio
                 href = nombre_link.get_attribute('href')
                 if href:
                     if href.startswith('/'):

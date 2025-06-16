@@ -3,9 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 from playwright.sync_api import Page
-from config.settings import Settings
-
-PROGRESO_PATH = "progreso_reseñas.json"
+from ..config.settings import Settings
 
 def guardar_progreso(idx_actual, csv_path, sitios_bloqueados):
     progreso = {
@@ -13,13 +11,13 @@ def guardar_progreso(idx_actual, csv_path, sitios_bloqueados):
         "idx_actual": idx_actual,
         "sitios_bloqueados": sitios_bloqueados
     }
-    with open(PROGRESO_PATH, "w", encoding="utf-8") as f:
+    with open(Settings.PROGRESO_PATH, "w", encoding="utf-8") as f:
         json.dump(progreso, f, ensure_ascii=False, indent=4)
-    print(f"Progreso guardado en {PROGRESO_PATH}")
+    print(f"Progreso guardado en {Settings.PROGRESO_PATH}")
 
 def cargar_progreso():
-    if os.path.exists(PROGRESO_PATH):
-        with open(PROGRESO_PATH, "r", encoding="utf-8") as f:
+    if os.path.exists(Settings.PROGRESO_PATH):
+        with open(Settings.PROGRESO_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     return None
 

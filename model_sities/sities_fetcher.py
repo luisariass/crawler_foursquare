@@ -3,14 +3,15 @@ Archivo principal que orquesta el proceso de scraping de Foursquare
 """
 import argparse
 import sys
+import os
 import numpy as np
 from playwright.sync_api import sync_playwright
 
-from config.settings import Settings
-from core.auth import FoursquareAuth
-from core.scraper import FoursquareScraper
-from core.data_handler import DataHandler
-from utils.helpers import print_progress
+from .config.settings import Settings
+from .core.auth import FoursquareAuth
+from .core.scraper import FoursquareScraper
+from .core.data_handler import DataHandler
+from .utils.helpers import print_progress
 
 class FoursquareScraperApp:
     """Aplicación principal para scraping de Foursquare"""
@@ -20,26 +21,31 @@ class FoursquareScraperApp:
         self.settings = Settings()
         self.auth = FoursquareAuth()
         self.scraper = FoursquareScraper()
-        self.data_handler = DataHandler()
+        self.data_handler = DataHandler(output_dir=self.settings.SITIES_OUTPUT_DIR)
     
-    def run(self, start_index: int = 0, end_index: int = None, process_all: bool = False) -> bool:
+    def run(self, start_index: int = 0, end_index: int = None, process_all: bool = False, csv_files: list = None) -> bool:
         """
         Ejecuta el proceso principal de scraping
-        
-        Args:
-            start_index: Índice de inicio para procesar URLs
-            end_index: Índice final para procesar URLs
-            process_all: Si es True, procesa todas las URLs ignorando end_index
-            
-        Returns:
-            True si el proceso se completó correctamente
         """
         try:
-            # Cargar URLs desde CSV
-            urls_data = self.scraper.load_urls_from_csv()
+            # Si se pasan archivos CSV específicos, úsalos; si no, usa todos los disponibles
+            if csv_files:
+                # Valida que los archivos existan
+                csv_files = [f for f in csv_files if os.path.isfile(f)]
+                if not csv_files:
+                    print("[ERROR] No se encontraron los archivos CSV especificados. Abortando.")
+                    return False
+            else:
+                csv_files = self.settings.get_caribbean_csvs()
+                if not csv_files:
+                    print("[ERROR] No se encontraron archivos CSV en caribbean_grid/data/. Abortando.")
+                    return False
+
+            print(f"[INFO] Archivos CSV a procesar: {len(csv_files)}")
+            urls_data = self.scraper.load_urls_from_csvs(csv_files)
             
             if urls_data.empty:
-                print("No se pudieron cargar URLs. Abortando.")
+                print("[ERROR] No se pudieron cargar URLs. Abortando.")
                 return False
             
             # Establecer rango de URLs a procesar
@@ -47,7 +53,7 @@ class FoursquareScraperApp:
                 end_index = len(urls_data) - 1  # Por defecto procesar todas las URLs
 
             total_urls = end_index - start_index + 1
-            print(f"Se procesarán {total_urls} URLs (desde índice {start_index} hasta {end_index})")
+            print(f"[INFO] Se procesarán {total_urls} URLs (índices {start_index} a {end_index})")
             
             with sync_playwright() as p:
                 # Iniciar navegador
@@ -57,7 +63,7 @@ class FoursquareScraperApp:
                 try:
                     # Realizar login
                     if not self.auth.login(page):
-                        print("Error en el proceso de login. Abortando.")
+                        print("[ERROR] Error en el proceso de login. Abortando.")
                         return False
                     
                     # Procesar cada URL del CSV
@@ -66,30 +72,22 @@ class FoursquareScraperApp:
                         municipio = info['municipio']
                         
                         print_progress(idx + 1, total_urls, "Procesando municipios")
-                        print(f"Procesando municipio: {municipio} - {url}")
-                        
+                        print(f"[INFO] {municipio}")
+
                         # Extraer sitios turísticos de la página
                         sitios_encontrados = self.scraper.extract_sites(page, url)
                         
                         if sitios_encontrados:
-                            # Añadir sitios y obtener estadísticas
                             stats = self.data_handler.add_sites(municipio, sitios_encontrados, idx + 1)
-                            
-                            # Actualizar información de URL procesada
                             self.data_handler.update_processed_url(municipio, url, {
                                 'sitios_encontrados': stats['new_sites'],
                                 'sitios_duplicados_omitidos': stats['duplicates_omitted'],
                                 'total_sitios_municipio': stats['total_sites']
                             })
-                            
-                            print(f"Se encontraron {stats['new_sites']} sitios nuevos en {municipio}")
-                            print(f"Total de sitios únicos en {municipio}: {stats['total_sites']}")
-                            
-                            # Guardar datos del municipio inmediatamente
+                            print(f"[INFO] {municipio}: {stats['new_sites']} sitios nuevos, {stats['duplicates_omitted']} duplicados omitidos, total: {stats['total_sites']}")
                             self.data_handler.save_municipio_data(municipio)
-                            
                         else:
-                            print(f"No se encontraron sitios en {municipio}")
+                            print(f"[WARN] {municipio}: No se encontraron sitios.")
                             self.data_handler.update_processed_url(municipio, url, {
                                 'sitios_encontrados': 0,
                                 'error': 'No se encontraron sitios'
@@ -97,7 +95,7 @@ class FoursquareScraperApp:
                         
                         # Guardar resumen cada N URLs procesadas
                         if (idx + 1) % self.settings.SAVE_INTERVAL == 0:
-                            print(f"Guardando resumen cada {self.settings.SAVE_INTERVAL} URLs procesadas")
+                            print(f"[INFO] Guardando resumen tras {self.settings.SAVE_INTERVAL} URLs procesadas")
                             self.data_handler.save_all_data()
                             page.wait_for_timeout(int(np.random.uniform(
                                 self.settings.WAIT_EXTRA_LONG_MIN, 
@@ -117,17 +115,14 @@ class FoursquareScraperApp:
                     browser.close()
                     
         except Exception as e:
-            print(f"Error general: {e}")
+            print(f"[ERROR] Error general: {e}")
             return False
         finally:
-            # Guardar todos los datos al finalizar
-            print("Guardando datos finales")
+            print("[INFO] Guardando datos finales")
             self.data_handler.save_all_data()
-            
-            # Mostrar estadísticas finales
             stats = self.data_handler.get_statistics()
-            print(f"Fin del programa. Total de sitios extraídos: {stats['total_sites']}")
-            print(f"Municipios procesados: {stats['municipalities']}")
+            print(f"[INFO] Fin del programa. Total de sitios extraídos: {stats['total_sites']}")
+            print(f"[INFO] Municipios procesados: {stats['municipalities']}")
 
 def main():
     """Punto de entrada principal con argumentos de línea de comandos"""
@@ -135,17 +130,18 @@ def main():
     parser.add_argument('--start', type=int, default=0, help='Índice de inicio para procesar URLs')
     parser.add_argument('--end', type=int, help='Índice final para procesar URLs')
     parser.add_argument('--all', action='store_true', help='Procesar todas las URLs')
-    
+    parser.add_argument('--csv', type=str, nargs='*', help='Ruta(s) de archivo(s) CSV a procesar')
+
     args = parser.parse_args()
     
     app = FoursquareScraperApp()
-    success = app.run(args.start, args.end, args.all)
+    success = app.run(args.start, args.end, args.all, csv_files=args.csv)
     
     if success:
-        print("Scraping completado exitosamente!")
+        print("[INFO] Scraping completado exitosamente!")
         sys.exit(0)
     else:
-        print("El proceso de scraping falló.")
+        print("[ERROR] El proceso de scraping falló.")
         sys.exit(1)
 
 if __name__ == "__main__":
