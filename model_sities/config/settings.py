@@ -22,8 +22,8 @@ class Settings:
     SITIES_OUTPUT_DIR = os.path.join(DATA_DIR, "sities")
     REVIEWS_OUTPUT_DIR = os.path.join(DATA_DIR, "reviewers_sities")
     PROGRESO_PATH = os.path.join(REVIEWS_OUTPUT_DIR, "progress_reviews.json")
+    FAILED_MUNICIPALITIES_PATH = os.path.join(DATA_DIR, "failed_municipalities.txt")
 
-    
     # URLs de Foursquare
     BASE_URL = "https://es.foursquare.com"
     LOGIN_URL = f"{BASE_URL}/login"
@@ -44,6 +44,8 @@ class Settings:
     
     # Configuración de procesamiento
     SAVE_INTERVAL = 5  # Guardar cada 5 URLs procesadas
+    RETRIES = 3  # Número de reintentos al fallar una URL
+    TIMEOUT = 60000
     
     # Selectores CSS
     SELECTORS = {
