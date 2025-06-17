@@ -22,3 +22,14 @@ def save_municipalities_to_csv(municipalities, department, output_dir):
     df = pd.DataFrame(rows)
     df.to_csv(filename, index=False, encoding='utf-8')
     print(f"Archivo generado: {filename}")
+    
+def generate_url(lat_centro, lon_centro, delta=0.04):
+    """
+    Genera URL de Foursquare para un área rectangular (bounding box)
+    alrededor de un punto central
+    """
+    lat_ne = lat_centro + delta/2
+    lon_ne = lon_centro + delta/2
+    lat_sw = lat_centro - delta/2
+    lon_sw = lon_centro - delta/2
+    return f"https://es.foursquare.com/explore?mode=url&ne={lat_ne},{lon_ne}&sw={lat_sw},{lon_sw}"
