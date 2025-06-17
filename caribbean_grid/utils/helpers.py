@@ -1,6 +1,5 @@
 import pandas as pd
 from pathlib import Path
-from urllib.parse import quote
 
 def save_municipalities_to_csv(municipalities, department, output_dir):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
