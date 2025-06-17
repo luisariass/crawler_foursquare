@@ -2,11 +2,11 @@ import pandas as pd
 import glob
 import os
 import time
-from .config.settings import ZONES_OUTPUT_DIR
-from .core.polygon import get_polygon, generate_zones
-from .utils.helpers import generate_url
+from config.settings import ZONES_OUTPUT_DIR
+from core.polygon import get_polygon, generate_zones
+from utils.helpers import generate_url
 
-def generate_zones():
+def generate_zone():
     csv_files = glob.glob("caribbean_grid/data/municipios_*.csv")
     for csv_file in csv_files:
         # Extrae el nombre del departamento del nombre del archivo
@@ -50,4 +50,4 @@ def generate_zones():
         print(f"Archivo generado: {out_path}")
 
 if __name__ == "__main__":
-    generate_zones()
+    generate_zone()
