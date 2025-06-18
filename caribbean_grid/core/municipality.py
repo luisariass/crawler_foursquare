@@ -5,7 +5,7 @@ def fetch_municipalities(departament):
     """Obtiene municipios de un departamento con solo los campos necesarios."""
     params = {
         "$where": f"dpto='{departament}'",
-        "$select": "nom_mpio, dpto", # Solo campos esenciales
+        "$select": "nom_mpio, dpto, longitud, latitud", # Solo campos esenciales
     }
     try:
         response = requests.get(DATOSGOV_API, params=params)
