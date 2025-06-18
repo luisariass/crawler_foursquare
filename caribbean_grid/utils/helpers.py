@@ -7,9 +7,14 @@ def save_municipalities_to_csv(municipalities, department, output_dir):
     for m in municipalities:
         municipio = m['nom_mpio'].strip().title()
         departamento = m['dpto'].strip().title()
+        lat = m.get('latitud', '').replace(',', '.')
+        lon = m.get('longitud', '').replace(',', '.')
+        
         rows.append({
             "municipio": municipio,
             "departamento": departamento,
+            "latitud": lat,
+            "longitud": lon,
         })
     filename = f"{output_dir}/municipios_{department.lower().replace(' ', '_').replace(',', '')}.csv"
     df = pd.DataFrame(rows)
