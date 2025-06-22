@@ -12,8 +12,6 @@ CARIBBEAN_DEPARTMENTS = [
 
 # URLs de APIs
 DATOSGOV_API = "https://www.datos.gov.co/resource/gdxc-w37w.json"
-NOMINATIM_API = "https://nominatim.openstreetmap.org/search"
-
 
 # Directorios de datos
 DATA_DIR = os.path.join(BASE_DIR, "data")
