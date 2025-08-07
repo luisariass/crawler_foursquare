@@ -1,6 +1,6 @@
 import geopandas as gpd
 
-def load_municipal_boundaries(shapefile_path):
+def load_boundaries(shapefile_path):
     """
     Carga un Shapefile desde la ruta especificada y lo prepara para el análisis.
     """
@@ -13,7 +13,7 @@ def load_municipal_boundaries(shapefile_path):
     print("Shapefile cargado y validado correctamente.")
     return gdf
 
-def find_cabecera_polygon(gdf, cod_dpto, cod_mpio):
+def find_polygon(gdf, cod_dpto, cod_mpio):
     """
     Busca el polígono de una cabecera municipal de forma precisa.
     1. Busca por código de departamento y municipio.
