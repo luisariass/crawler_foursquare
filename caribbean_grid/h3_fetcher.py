@@ -1,48 +1,62 @@
 import pandas as pd
 import glob
 import os
+import unicodedata
+import geopandas as gpd
 from config.settings import ZONES_OUTPUT_DIR
-# Importamos la nueva función de búsqueda por código
-from utils.shapefile_helpers import load_municipal_boundaries, get_polygon_from_gdf_by_code
+from utils.shapefile_helpers import load_municipal_boundaries, find_cabecera_polygon
 from utils.h3_helpers import get_h3_cells_from_polygon, h3_cell_to_center, h3_cell_to_bbox
 
+def normalize_text(text):
+    if not isinstance(text, str):
+        return ""
+    text = text.lower()
+    text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+    return text.strip()
+
 def generate_zones_from_shapefile():
-    # --- ¡ACCIÓN REQUERIDA! ---
-    # 1. Confirma la ruta a tu Shapefile. Geopandas puede leer la carpeta directamente.
-    # 2. Usa los nombres de las COLUMNAS DE CÓDIGOS que encontraste en tu Shapefile.
     SHAPEFILE_PATH = "caribbean_grid/data/MGN2020_URB_AREA_CENSAL"
-    MUNICIPIO_CODE_COL = "COD_MPIO"      # Columna con el código del municipio
-    DEPARTAMENTO_CODE_COL = "COD_DPTO"   # Columna con el código del departamento
     
-    # Carga el Shapefile una sola vez al inicio
     try:
         gdf = load_municipal_boundaries(SHAPEFILE_PATH)
+        gdf = gdf.to_crs("EPSG:4326")
     except Exception as e:
-        print(f"Error fatal: No se pudo cargar el Shapefile. Verifica la ruta. Error: {e}")
+        print(f"Error fatal: No se pudo cargar o procesar el Shapefile. {e}")
         return
 
     csv_files = glob.glob("caribbean_grid/data/municipios_*.csv")
     for csv_file in csv_files:
         departamento = os.path.basename(csv_file).replace("municipios_", "").replace(".csv", "").replace("_", " ").title()
-        df = pd.read_csv(csv_file)
+        #df = pd.read_csv(csv_file)
+        df = pd.read_csv(csv_file, dtype={'cod_dpto': str, 'cod_mpio': str})
         rows = []
         print(f"\n--- Procesando Departamento: {departamento} ---")
+        
         for _, row in df.iterrows():
-            municipio = row["municipio"]
-            # Leemos los códigos desde el CSV
-            cod_dpto = row["cod_dpto"]
-            cod_mpio = row["cod_mpio"]
+            municipio = str(row["municipio"]).strip()
+            cod_dpto = str(row.get("cod_dpto", "")).strip()
+            cod_mpio = str(row.get("cod_mpio", "")).strip()
             
             print(f"Procesando {municipio} (Código: {cod_mpio})...")
             
-            # Busca el polígono usando los códigos
-            polygon = get_polygon_from_gdf_by_code(
-                gdf, DEPARTAMENTO_CODE_COL, MUNICIPIO_CODE_COL, cod_dpto, cod_mpio
-            )
+            polygon = find_cabecera_polygon(gdf, cod_dpto, cod_mpio)
             
-            if polygon:
-                # Rellena el polígono exacto con celdas H3
-                h3_cells = get_h3_cells_from_polygon(polygon, resolution=8)
+            if polygon and not polygon.is_empty:
+                resolution = 10
+                
+                if polygon.area < 0.001:
+                    resolution = 11
+                
+                h3_cells = get_h3_cells_from_polygon(polygon, resolution=resolution)
+                
+                if len(h3_cells) > 250 and resolution > 8:
+                    resolution -= 1
+                    h3_cells = get_h3_cells_from_polygon(polygon, resolution=resolution)
+                
+                if len(h3_cells) < 3 and resolution < 11:
+                    resolution += 1
+                    h3_cells = get_h3_cells_from_polygon(polygon, resolution=resolution)
+                
                 for cell in h3_cells:
                     lat_centro, lon_centro = h3_cell_to_center(cell)
                     lat_ne, lon_ne, lat_sw, lon_sw = h3_cell_to_bbox(cell)
@@ -50,12 +64,12 @@ def generate_zones_from_shapefile():
                     rows.append({
                         "municipio": municipio, "departamento": departamento, "latitude": lat_centro,
                         "longitude": lon_centro, "h3_cell": cell, "url_municipio": url,
-                        "origen_poligono": "shapefile", "lat_ne": lat_ne, "lon_ne": lon_ne,
-                        "lat_sw": lat_sw, "lon_sw": lon_sw
+                        "origen_poligono": "shapefile_cabecera", "lat_ne": lat_ne, "lon_ne": lon_ne,
+                        "lat_sw": lat_sw, "lon_sw": lon_sw, "resolution": resolution
                     })
-                print(f"  → {len(h3_cells)} zonas H3 generadas para {municipio} desde el Shapefile.")
+                print(f"  → {len(h3_cells)} zonas H3 generadas para la CABECERA de {municipio} (resolución {resolution}).")
             else:
-                print(f"  → ADVERTENCIA: No se encontró polígono para {municipio} (Código: {cod_mpio}) en el Shapefile.")
+                print(f"  → ADVERTENCIA: No se encontró cabecera para {municipio} (Código: {cod_mpio}) en el Shapefile.")
 
         out_path = os.path.join(
             ZONES_OUTPUT_DIR,
