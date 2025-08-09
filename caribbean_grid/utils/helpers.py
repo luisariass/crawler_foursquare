@@ -1,6 +1,5 @@
 import pandas as pd
 from pathlib import Path
-from urllib.parse import quote
 
 def save_municipalities_to_csv(municipalities, department, output_dir):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -10,13 +9,18 @@ def save_municipalities_to_csv(municipalities, department, output_dir):
         departamento = m['dpto'].strip().title()
         lat = m.get('latitud', '').replace(',', '.')
         lon = m.get('longitud', '').replace(',', '.')
-        url_municipio = f"https://es.foursquare.com/explore?near={quote(municipio + ', ' + departamento + ', Colombia')}"
+        # Extraemos los códigos del diccionario de la API
+        cod_dpto = m.get('cod_dpto')
+        cod_mpio = m.get('cod_mpio')
+        
         rows.append({
             "municipio": municipio,
             "departamento": departamento,
-            "latitude": lat,
-            "longitude": lon,
-            "url_municipio": url_municipio
+            "latitud": lat,
+            "longitud": lon,
+            # Añadimos los códigos al diccionario que se guardará
+            "cod_dpto": cod_dpto,
+            "cod_mpio": cod_mpio,
         })
     filename = f"{output_dir}/municipios_{department.lower().replace(' ', '_').replace(',', '')}.csv"
     df = pd.DataFrame(rows)
