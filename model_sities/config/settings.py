@@ -67,4 +67,4 @@ class Settings:
     @classmethod
     def get_caribbean_csvs(cls):
         """Devuelve la lista de archivos CSV generados por caribbean_grid"""
-        return glob.glob(os.path.join(CARIBBEAN_CSV_DIR, "*.csv"))
+        return glob.glob(os.path.join(Settings.CARIBBEAN_CSV_DIR, "*.csv"))
