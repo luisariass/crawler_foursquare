@@ -12,10 +12,14 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 
 
 # Ruta a los CSVs generados por caribbean_grid
-CARIBBEAN_CSV_DIR = os.path.join(os.path.dirname(BASE_DIR), "caribbean_grid", "data")
+# El subdirectorio 'zonas_departamentos' es configurable para facilitar la integración con caribbean_grid.
 
 class Settings:
     """Configuración centralizada para el scraper"""
+    # Subdirectorio configurable para los CSVs generados por caribbean_grid
+    CARIBBEAN_SUBDIR = "zonas_departamentos"
+    # Ruta a los CSVs generados por caribbean_grid
+    CARIBBEAN_CSV_DIR = os.path.join(os.path.dirname(BASE_DIR), "caribbean_grid", "data", CARIBBEAN_SUBDIR)
     
     # Archivos y directorios con rutas absolutas
     COOKIES_JSON = os.path.join(DATA_DIR, "cookies_foursquare.json")

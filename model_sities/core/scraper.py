@@ -31,8 +31,8 @@ class FoursquareScraper:
         return pd.DataFrame()
     
     def extract_sites(self, page, url, municipio="", max_retries=None, timeout=None) -> list:
-        max_retries = max_retries or Settings.SCRAPER_MAX_RETRIES
-        timeout = timeout or Settings.SCRAPER_TIMEOUT_MS
+        max_retries = max_retries or Settings.RETRIES
+        timeout = timeout or Settings.TIMEOUT
 
         for attempt in range(1, max_retries + 1):
             try:
