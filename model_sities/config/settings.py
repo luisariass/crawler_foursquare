@@ -12,7 +12,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 
 
 # Ruta a los CSVs generados por caribbean_grid
-CARIBBEAN_CSV_DIR = os.path.join(os.path.dirname(BASE_DIR), "caribbean_grid", "data")
+CARIBBEAN_CSV_DIR = os.path.join(os.path.dirname(BASE_DIR), "caribbean_grid", "data", "zonas_departamentos")
 
 class Settings:
     """Configuración centralizada para el scraper"""
