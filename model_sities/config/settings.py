@@ -1,8 +1,8 @@
+import os
+
 """
 Configuración para el scraper de Foursquare
 """
-import os
-import glob
 
 # Ruta base del proyecto (carpeta model_sities)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,7 +34,7 @@ class Settings:
     
     # Configuración del navegador
     BROWSER_TYPE = "chromium"  # firefox, chromium, webkit 
-    HEADLESS = True # False = firefox con interfaz gráfica, True = sin interfaz gráfica
+    HEADLESS = False # False = firefox con interfaz gráfica, True = sin interfaz gráfica
     
     # Tiempos de espera (en milisegundos)
     WAIT_SHORT_MIN = 1000
@@ -50,21 +50,49 @@ class Settings:
     SAVE_INTERVAL = 5  # Guardar cada 5 URLs procesadas
     RETRIES = 3  # Número de reintentos al fallar una URL
     TIMEOUT = 60000
+    PARALLEL_PROCESSES = 1
+    REQUEST_DELAY = 2
     
     # Selectores CSS
     SELECTORS = {
-        'content_holder': '.contentHolder',
-        'venue_score': '.venueScore.positive',
-        'venue_name': 'h2',
-        'venue_category': '.venueDataItem',
-        'venue_address': '.venueAddress',
+        'content_holder': '[data-testid="result-card"]',
         'more_results_button': 'button:has-text("Ver más resultados")',
-        'login_username': 'input[id="username"]',
-        'login_password': 'input[id="password"]',
-        'login_button': 'input[id="loginFormButton"]'
+        'venue_score': '[data-testid="venue-rating"]',
+        'venue_name': 'div.venue-name',
+        'venue_category': 'div.venue-category',
+        'venue_address': 'div.venue-address',
+        
+        # Selector para el botón "Buscar en esta área" que fuerza la carga.
+        'requery_button': 'div.leaflet-control-requery a',
+        
+        # Selector para el elemento que aparece cuando no hay sitios.
+        'no_results_indicator': 'li.card.noResults',
+
+        # Selector para el input/botón que abre el menú de categorías
+        'category_menu_trigger': 'input[placeholder*="buscando"]',
+        
+        # Selector para el panel del menú de categorías una vez abierto
+        'category_menu_panel': 'ul.recommendationList',
+        
+        # Selector para un item individual dentro del menú de categorías
+        'category_item': 'ul.recommendationList > li'
     }
-    
-    @classmethod
-    def get_caribbean_csvs(cls):
-        """Devuelve la lista de archivos CSV generados por caribbean_grid"""
-        return glob.glob(os.path.join(Settings.CARIBBEAN_CSV_DIR, "*.csv"))
+
+    # Lista de las etiquetas de categoría a buscar (el texto debe ser exacto)
+    CATEGORY_LABELS = [
+        "Favoritos",
+        "Tendencias",
+        "Comida",
+        "Café",
+        "Nocturna",
+        "Diversión",
+        "Compras",
+        "Bares"
+    ]
+
+    def get_caribbean_csvs(self) -> list:
+        """Obtiene la lista de archivos CSV del directorio de caribbean_grid"""
+        if not os.path.exists(self.CARIBBEAN_CSV_DIR):
+            print(f"[ERROR] El directorio {self.CARIBBEAN_CSV_DIR} no existe.")
+            return []
+        return [os.path.join(self.CARIBBEAN_CSV_DIR, f) for f in os.listdir(self.CARIBBEAN_CSV_DIR) if f.endswith('.csv')]
