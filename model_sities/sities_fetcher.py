@@ -14,8 +14,8 @@ from .utils.helpers import print_progress
 
 def process_municipio_worker(task_info: dict):
     """
-    Esta es la función "trabajadora" que será ejecutada por cada proceso del pool.
-    Es autónoma: inicia su propio navegador, hace login, extrae los datos y se cierra.
+    Función "trabajadora" que se ejecuta en un proceso aislado.
+    Inicia su propio navegador, hace login, extrae datos de una zona y se cierra.
     """
     municipio = task_info['municipio']
     url = task_info['url']
@@ -31,10 +31,11 @@ def process_municipio_worker(task_info: dict):
         page = browser.new_page()
         try:
             if not auth.login(page):
-                print(f"[ERROR] Login fallido para el worker de {municipio}. Abortando este worker.")
+                print(f"[ERROR] Login fallido para el worker de {municipio}.")
                 return {'municipio': municipio, 'url': url, 'sites': [], 'status': 'login_failed'}
             
-            sitios_encontrados = scraper.extract_sites_zone(page, url, municipio)
+            # Usamos la función simplificada del scraper
+            sitios_encontrados = scraper.extract_sites_from_zone(page, url, municipio)
             
             return {'municipio': municipio, 'url': url, 'sites': sitios_encontrados, 'status': 'success'}
         
@@ -51,6 +52,7 @@ class FoursquareScraperApp:
     def __init__(self):
         """Inicializa la aplicación"""
         self.settings = Settings()
+        self.scraper = FoursquareScraper()
         self.data_handler = DataHandler(output_dir=self.settings.SITIES_OUTPUT_DIR)
     
     def run(self, csv_files: list = None) -> bool:
@@ -65,7 +67,7 @@ class FoursquareScraperApp:
                     return False
 
             print(f"[INFO] Archivos CSV a procesar: {len(csv_files)}")
-            urls_data = FoursquareScraper().load_urls_from_csvs(csv_files)
+            urls_data = self.scraper.load_urls_from_csvs(csv_files)
             
             if urls_data.empty:
                 print("[ERROR] No se pudieron cargar URLs. Abortando.")
@@ -79,10 +81,7 @@ class FoursquareScraperApp:
             processed_count = 0
             print(f"[INFO] Se procesarán {total_tasks} municipios en paralelo con {self.settings.PARALLEL_PROCESSES} procesos.")
 
-            # --- LÓGICA DE GUARDADO INCREMENTAL ---
-            # Usamos imap_unordered para procesar y guardar los resultados tan pronto como llegan.
             with Pool(processes=self.settings.PARALLEL_PROCESSES) as pool:
-                # El iterador 'results' entregará el resultado de cada worker en cuanto termine.
                 results_iterator = pool.imap_unordered(process_municipio_worker, tasks)
                 
                 for result in results_iterator:
@@ -99,18 +98,23 @@ class FoursquareScraperApp:
                                 'sitios_duplicados_omitidos': stats['duplicates_omitted'],
                                 'total_sitios_municipio': stats['total_sites']
                             })
-                            # Guardado inmediato del archivo JSON para este municipio
                             self.data_handler.save_municipio_data(municipio)
                         else:
                             self.data_handler.update_processed_url(municipio, result['url'], {
                                 'sitios_encontrados': 0, 'error': 'No se encontraron sitios'
                             })
+                        # Guardar siempre el resumen para registrar el progreso
+                        self.data_handler.save_all_data()
+                            
                     else:
                         municipio_fallido = result.get('municipio', 'desconocido')
                         url_fallida = result.get('url', 'desconocida')
                         estado_fallo = result.get('status', 'desconocido')
                         print(f"\n[WARN] La tarea para {municipio_fallido} falló con estado: {estado_fallo}")
-                        FoursquareScraper().register_failed_municipality(municipio_fallido, url_fallida, estado_fallo)
+                        self.data_handler.update_processed_url(municipio_fallido, url_fallida, {
+                            'sitios_encontrados': 0, 'error': f'Fallo del worker: {estado_fallo}'
+                        })
+                        self.data_handler.save_all_data()
 
             return True
                     
@@ -119,7 +123,6 @@ class FoursquareScraperApp:
             return False
         finally:
             print("\n[INFO] Guardando resumen final de la extracción.")
-            # Este guardado final asegura que el resumen general se escriba.
             self.data_handler.save_all_data()
             stats = self.data_handler.get_statistics()
             print(f"[INFO] Fin del programa. Total de sitios únicos extraídos: {stats['total_sites']}")
