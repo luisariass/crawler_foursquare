@@ -40,17 +40,23 @@ class Settings:
     WAIT_SHORT_MIN = 1000
     WAIT_SHORT_MAX = 3000
     WAIT_MEDIUM_MIN = 5000
-    WAIT_MEDIUM_MAX = 6000
+    WAIT_MEDIUM_MAX = 7000
     WAIT_LONG_MIN = 15000
     WAIT_LONG_MAX = 25000
     WAIT_EXTRA_LONG_MIN = 30000
     WAIT_EXTRA_LONG_MAX = 40000
     
+    # Pausa aleatoria post-carga para mitigar bloqueos
+    POST_LOAD_WAIT_MIN = 2500
+    POST_LOAD_WAIT_MAX = 5000
+    
     # Configuración de procesamiento
     SAVE_INTERVAL = 5  # Guardar cada 5 URLs procesadas
     RETRIES = 3  # Número de reintentos al fallar una URL
     TIMEOUT = 60000
-    
+    PARALLEL_PROCESSES = 4 # Número de procesos a ejecutar en paralelo
+    BACKOFF_FACTOR = 10 # Factor para el backoff progresivo en reintentos
+
     # Selectores CSS
     SELECTORS = {
         'content_holder': '.contentHolder',
@@ -61,10 +67,12 @@ class Settings:
         'more_results_button': 'button:has-text("Ver más resultados")',
         'login_username': 'input[id="username"]',
         'login_password': 'input[id="password"]',
-        'login_button': 'input[id="loginFormButton"]'
+        'login_button': 'input[id="loginFormButton"]',
+        'no_results_card': 'li.card.noResults'
     }
     
     @classmethod
     def get_caribbean_csvs(cls):
         """Devuelve la lista de archivos CSV generados por caribbean_grid"""
-        return glob.glob(os.path.join(CARIBBEAN_CSV_DIR, "*.csv"))
+        # Usamos la variable de clase CARIBBEAN_CSV_DIR
+        return glob.glob(os.path.join(cls.CARIBBEAN_CSV_DIR, "*.csv"))

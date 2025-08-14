@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import time
 from typing import Dict, Any
-from playwright.sync_api import Page
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 from ..config.settings import Settings
 from ..utils.helpers import current_timestamp
 
@@ -31,59 +31,73 @@ class FoursquareScraper:
         return pd.DataFrame()
     
     def extract_sites(self, page, url, municipio="", max_retries=None, timeout=None) -> list:
-        max_retries = max_retries or Settings.RETRIES
-        timeout = timeout or Settings.TIMEOUT
+        max_retries = max_retries or self.settings.RETRIES
+        timeout = timeout or self.settings.TIMEOUT
 
         for attempt in range(1, max_retries + 1):
             try:
-                print(f"Intento {attempt} de {max_retries} para {municipio} ({url})")
+                print(f"Intento {attempt}/{max_retries} para {municipio} ({url})")
                 page.goto(url, timeout=timeout)
-                page.wait_for_timeout(int(np.random.uniform(2000, 4000)))
-                # ... scraping real ...
-                sitios_list = []
-                page.wait_for_selector(Settings.SELECTORS['content_holder'], timeout=10000)
+                
+                # Pausa aleatoria post-carga para mitigar bloqueos
+                post_load_wait = int(np.random.uniform(self.settings.POST_LOAD_WAIT_MIN, self.settings.POST_LOAD_WAIT_MAX))
+                page.wait_for_timeout(post_load_wait)
+
+                content_selector = self.settings.SELECTORS['content_holder']
+                no_results_selector = self.settings.SELECTORS['no_results_card']
+
+                # Espera a que cargue el contenido principal o el mensaje de "sin resultados"
+                page.locator(f"{content_selector}, {no_results_selector}").first.wait_for(timeout=20000)
+
+                # Comprueba si la página indica que no hay resultados
+                if page.is_visible(no_results_selector):
+                    print(f"[INFO] Zona vacía para {municipio}. No se encontraron sitios.")
+                    return []  # Devuelve lista vacía y termina, no es un error.
+
+                # Si hay resultados, procede con el scraping
                 self._load_all_results(page)
-                sitios = page.query_selector_all(Settings.SELECTORS['content_holder'])
-                for i, sitio in enumerate(sitios):
+                sitios_elements = page.query_selector_all(content_selector)
+                
+                sitios_list = []
+                for i, sitio_element in enumerate(sitios_elements):
                     try:
-                        site_data = self._extract_site_data(sitio, i + 1)
+                        site_data = self._extract_site_data(sitio_element, i + 1)
                         sitios_list.append(site_data)
-                    except Exception:
-                        print(f"[WARN] Sitio {i + 1} no procesado.")
-                        continue
+                    except Exception as e:
+                        print(f"[WARN] No se pudo procesar un sitio en {municipio}: {e}")
+                
                 return sitios_list
-            except Exception as e:
-                # Detecta bloqueo por Foursquare (puedes mejorar esta lógica)
-                error_str = str(e).lower()
-                if "429" in error_str or "captcha" in error_str or "blocked" in error_str:
-                    print(f"[BLOCKED] Bloqueo detectado para {municipio} ({url})")
-                    self.register_failed_municipality(municipio, url, "bloqueo")
-                    break  # No reintentes si es bloqueo
-                elif "timeout" in error_str:
-                    print(f"[TIMEOUT] Timeout para {municipio} ({url})")
-                    if attempt == max_retries:
-                        self.register_failed_municipality(municipio, url, "timeout")
+
+            except PlaywrightTimeoutError:
+                print(f"[TIMEOUT] Timeout en intento {attempt} para {municipio}.")
+                if attempt == max_retries:
+                    self.register_failed_municipality(municipio, url, "timeout_final")
                 else:
-                    print(f"[ERROR] Error en intento {attempt} para {municipio} ({url}): {e}")
-                if attempt < max_retries:
-                    wait_time = 10 * attempt
-                    print(f"Reintentando en {wait_time} segundos...")
+                    # Lógica de Backoff Progresivo
+                    wait_time = self.settings.BACKOFF_FACTOR * attempt
+                    print(f"Esperando {wait_time} segundos antes de reintentar...")
                     time.sleep(wait_time)
+            except Exception as e:
+                print(f"[ERROR] Error inesperado en intento {attempt} para {municipio}: {e}")
+                self.register_failed_municipality(municipio, url, f"error_inesperado: {e}")
+                break # Si el error no es un timeout, no reintentar.
+
         return []
+
     def register_failed_municipality(self, municipio, url, reason):
-        failed_path = Settings.FAILED_MUNICIPALITIES_PATH
+        failed_path = self.settings.FAILED_MUNICIPALITIES_PATH
         with open(failed_path, "a", encoding="utf-8") as f:
-            f.write(f"{municipio},{url},{reason}\n")
+            f.write(f"{municipio},{url},{reason},{current_timestamp()}\n")
         print(f"[FAILED] Municipio registrado: {municipio} ({url}) - Razón: {reason}")
     
     def _load_all_results(self, page: Page) -> None:
         """Hace clic en 'Ver más resultados' hasta que no haya más"""
         try:
             while True:
-                boton = page.query_selector(Settings.SELECTORS['more_results_button'])
-                if boton:
+                boton = page.query_selector(self.settings.SELECTORS['more_results_button'])
+                if boton and boton.is_visible():
                     boton.click()
-                    page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_SHORT_MIN, Settings.WAIT_SHORT_MAX)))
+                    page.wait_for_timeout(int(np.random.uniform(self.settings.WAIT_SHORT_MIN, self.settings.WAIT_SHORT_MAX)))
                 else:
                     break
         except Exception:
@@ -101,34 +115,26 @@ class FoursquareScraper:
             "fecha_extraccion": current_timestamp()
         }
         
-        # Extraer puntuación
-        puntuacion_element = sitio.query_selector(Settings.SELECTORS['venue_score'])
+        puntuacion_element = sitio.query_selector(self.settings.SELECTORS['venue_score'])
         if puntuacion_element:
             sitio_data["puntuacion"] = puntuacion_element.inner_text().strip()
         
-        # Extraer nombre
-        nombre_element = sitio.query_selector(Settings.SELECTORS['venue_name'])
+        nombre_element = sitio.query_selector(self.settings.SELECTORS['venue_name'])
         if nombre_element:
             nombre_link = nombre_element.query_selector('a')
             if nombre_link:
                 sitio_data["nombre"] = nombre_link.inner_text().strip()
                 href = nombre_link.get_attribute('href')
                 if href:
-                    if href.startswith('/'):
-                        sitio_data["url_sitio"] = f"{Settings.BASE_URL}{href}"
-                    else:
-                        sitio_data["url_sitio"] = href
+                    sitio_data["url_sitio"] = f"{self.settings.BASE_URL}{href}" if href.startswith('/') else href
             else:
                 sitio_data["nombre"] = nombre_element.inner_text().strip()
         
-        # Extraer categoría
-        categoria_element = sitio.query_selector(Settings.SELECTORS['venue_category'])
+        categoria_element = sitio.query_selector(self.settings.SELECTORS['venue_category'])
         if categoria_element:
-            categoria_text = categoria_element.inner_text().strip()
-            sitio_data["categoria"] = categoria_text.replace('•', '').strip()
+            sitio_data["categoria"] = categoria_element.inner_text().strip().replace('•', '').strip()
         
-        # Extraer dirección
-        direccion_element = sitio.query_selector(Settings.SELECTORS['venue_address'])
+        direccion_element = sitio.query_selector(self.settings.SELECTORS['venue_address'])
         if direccion_element:
             sitio_data["direccion"] = direccion_element.inner_text().strip()
         

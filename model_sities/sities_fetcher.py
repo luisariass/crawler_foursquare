@@ -1,10 +1,10 @@
 """
-Archivo principal que orquesta el proceso de scraping de Foursquare
+Archivo principal que orquesta el proceso de scraping de Foursquare en paralelo.
 """
 import argparse
 import sys
 import os
-import numpy as np
+from multiprocessing import Pool
 from playwright.sync_api import sync_playwright
 
 from .config.settings import Settings
@@ -13,112 +13,129 @@ from .core.scraper import FoursquareScraper
 from .core.data_handler import DataHandler
 from .utils.helpers import print_progress
 
+def worker_process(task_info: dict):
+    """
+    Función ejecutada por cada proceso del pool.
+    Es autónoma: inicia su propio navegador, hace login, extrae datos y se cierra.
+    """
+    url = task_info['url']
+    municipio = task_info['municipio']
+    
+    print(f"[WORKER] Iniciando para {municipio}")
+    
+    # Cada worker necesita sus propias instancias
+    settings = Settings()
+    auth = FoursquareAuth()
+    scraper = FoursquareScraper()
+
+    with sync_playwright() as p:
+        browser = getattr(p, settings.BROWSER_TYPE).launch(headless=settings.HEADLESS)
+        page = browser.new_page()
+        try:
+            if not auth.login(page):
+                print(f"[ERROR][WORKER] Login fallido para {municipio}")
+                return {'municipio': municipio, 'url': url, 'sites': [], 'status': 'login_failed'}
+            
+            sitios = scraper.extract_sites(page, url, municipio)
+            return {'municipio': municipio, 'url': url, 'sites': sitios, 'status': 'success'}
+        except Exception as e:
+            print(f"[ERROR][WORKER] Proceso para {municipio} falló: {e}")
+            return {'municipio': municipio, 'url': url, 'sites': [], 'status': 'failed'}
+        finally:
+            browser.close()
+
+
 class FoursquareScraperApp:
     """Aplicación principal para scraping de Foursquare"""
     
     def __init__(self):
         """Inicializa la aplicación"""
         self.settings = Settings()
-        self.auth = FoursquareAuth()
         self.scraper = FoursquareScraper()
         self.data_handler = DataHandler(output_dir=self.settings.SITIES_OUTPUT_DIR)
     
     def run(self, start_index: int = 0, end_index: int = None, process_all: bool = False, csv_files: list = None) -> bool:
         """
-        Ejecuta el proceso principal de scraping
+        Ejecuta el proceso principal de scraping en paralelo.
         """
         try:
-            # Si se pasan archivos CSV específicos, úsalos; si no, usa todos los disponibles
             if csv_files:
-                # Valida que los archivos existan
                 csv_files = [f for f in csv_files if os.path.isfile(f)]
                 if not csv_files:
-                    print("[ERROR] No se encontraron los archivos CSV especificados. Abortando.")
+                    print("[ERROR] No se encontraron los archivos CSV especificados.")
                     return False
             else:
                 csv_files = self.settings.get_caribbean_csvs()
                 if not csv_files:
-                    print("[ERROR] No se encontraron archivos CSV en caribbean_grid/data/. Abortando.")
+                    print("[ERROR] No se encontraron archivos CSV.")
                     return False
 
             print(f"[INFO] Archivos CSV a procesar: {len(csv_files)}")
             urls_data = self.scraper.load_urls_from_csvs(csv_files)
             
             if urls_data.empty:
-                print("[ERROR] No se pudieron cargar URLs. Abortando.")
+                print("[ERROR] No se pudieron cargar URLs.")
                 return False
             
-            # Establecer rango de URLs a procesar
-            if end_index is None:
-                end_index = len(urls_data) - 1  # Por defecto procesar todas las URLs
+            if end_index is None or process_all:
+                end_index = len(urls_data) - 1
 
-            total_urls = end_index - start_index + 1
-            print(f"[INFO] Se procesarán {total_urls} URLs (índices {start_index} a {end_index})")
+            urls_to_process = urls_data.iloc[start_index:end_index+1]
+            tasks = [
+                {'url': info['url_municipio'], 'municipio': info['municipio']}
+                for _, info in urls_to_process.iterrows()
+            ]
+            total_tasks = len(tasks)
+            print(f"[INFO] Se procesarán {total_tasks} URLs (índices {start_index} a {end_index}) usando {self.settings.PARALLEL_PROCESSES} procesos.")
             
-            with sync_playwright() as p:
-                # Iniciar navegador
-                browser = getattr(p, self.settings.BROWSER_TYPE).launch(headless=self.settings.HEADLESS)
-                page = browser.new_page()
-                
-                try:
-                    # Realizar login
-                    if not self.auth.login(page):
-                        print("[ERROR] Error en el proceso de login. Abortando.")
-                        return False
-                    
-                    # Procesar cada URL del CSV
-                    for idx, (_, info) in enumerate(urls_data.iloc[start_index:end_index+1].iterrows()):
-                        url = info['url_municipio']
-                        municipio = info['municipio']
-                        
-                        print_progress(idx + 1, total_urls, "Procesando municipios")
-                        print(f"[INFO] {municipio}")
+            processed_count = 0
+            with Pool(processes=self.settings.PARALLEL_PROCESSES) as pool:
+                # imap_unordered procesa los resultados a medida que están listos
+                results_iterator = pool.imap_unordered(worker_process, tasks)
 
-                        # Extraer sitios turísticos de la página
-                        sitios_encontrados = self.scraper.extract_sites(page, url)
+                for result in results_iterator:
+                    processed_count += 1
+                    print_progress(processed_count, total_tasks, "Procesando municipios")
+
+                    if result and result['status'] == 'success':
+                        municipio = result['municipio']
+                        sitios_encontrados = result['sites']
                         
                         if sitios_encontrados:
-                            stats = self.data_handler.add_sites(municipio, sitios_encontrados, idx + 1)
-                            self.data_handler.update_processed_url(municipio, url, {
+                            stats = self.data_handler.add_sites(municipio, sitios_encontrados, processed_count)
+                            self.data_handler.update_processed_url(municipio, result['url'], {
                                 'sitios_encontrados': stats['new_sites'],
                                 'sitios_duplicados_omitidos': stats['duplicates_omitted'],
                                 'total_sitios_municipio': stats['total_sites']
                             })
-                            print(f"[INFO] {municipio}: {stats['new_sites']} sitios nuevos, {stats['duplicates_omitted']} duplicados omitidos, total: {stats['total_sites']}")
+                            print(f"\n[INFO] {municipio}: {stats['new_sites']} sitios nuevos, {stats['duplicates_omitted']} duplicados omitidos.")
                             self.data_handler.save_municipio_data(municipio)
                         else:
-                            print(f"[WARN] {municipio}: No se encontraron sitios.")
-                            self.data_handler.update_processed_url(municipio, url, {
+                            print(f"\n[WARN] {municipio}: No se encontraron sitios.")
+                            self.data_handler.update_processed_url(municipio, result['url'], {
                                 'sitios_encontrados': 0,
-                                'error': 'No se encontraron sitios'
+                                'error': 'Zona vacia o sin sitios'
                             })
-                        
-                        # Guardar resumen cada N URLs procesadas
-                        if (idx + 1) % self.settings.SAVE_INTERVAL == 0:
-                            print(f"[INFO] Guardando resumen tras {self.settings.SAVE_INTERVAL} URLs procesadas")
-                            self.data_handler.save_all_data()
-                            page.wait_for_timeout(int(np.random.uniform(
-                                self.settings.WAIT_EXTRA_LONG_MIN, 
-                                self.settings.WAIT_EXTRA_LONG_MAX
-                            )))
-                        
-                        # Espera entre URLs (comportamiento humano)
-                        if idx < total_urls - 1:  # No esperar después de la última URL
-                            page.wait_for_timeout(int(np.random.uniform(
-                                self.settings.WAIT_LONG_MIN, 
-                                self.settings.WAIT_LONG_MAX
-                            )))
-                    
-                    return True
-                    
-                finally:
-                    browser.close()
+                    else:
+                        municipio_fallido = result.get('municipio', 'Desconocido')
+                        print(f"\n[WARN] Tarea fallida para {municipio_fallido}. Estado: {result.get('status', 'error')}")
+                        self.data_handler.update_processed_url(municipio_fallido, result.get('url', ''), {
+                            'sitios_encontrados': 0,
+                            'error': f"Fallo del worker: {result.get('status', 'error')}"
+                        })
+
+                    # Guardado incremental del resumen general
+                    if processed_count % self.settings.SAVE_INTERVAL == 0 or processed_count == total_tasks:
+                        print(f"\n[INFO] Guardando resumen tras {processed_count} URLs procesadas.")
+                        self.data_handler.save_all_data()
+            
+            return True
                     
         except Exception as e:
-            print(f"[ERROR] Error general: {e}")
+            print(f"[ERROR] Error general en el orquestador: {e}")
             return False
         finally:
-            print("[INFO] Guardando datos finales")
+            print("\n[INFO] Guardando datos finales.")
             self.data_handler.save_all_data()
             stats = self.data_handler.get_statistics()
             print(f"[INFO] Fin del programa. Total de sitios extraídos: {stats['total_sites']}")
@@ -126,7 +143,7 @@ class FoursquareScraperApp:
 
 def main():
     """Punto de entrada principal con argumentos de línea de comandos"""
-    parser = argparse.ArgumentParser(description='Scraper de Foursquare')
+    parser = argparse.ArgumentParser(description='Scraper de Foursquare en Paralelo')
     parser.add_argument('--start', type=int, default=0, help='Índice de inicio para procesar URLs')
     parser.add_argument('--end', type=int, help='Índice final para procesar URLs')
     parser.add_argument('--all', action='store_true', help='Procesar todas las URLs')
