@@ -1,23 +1,23 @@
 """
-Clase principal para realizar scraping en Foursquare.
-Contiene la lógica para cargar URLs y extraer sitios de una zona geográfica.
+Clase principal para realizar scraping en Foursquare
 """
 import pandas as pd
-from typing import Dict, Any, List
+import numpy as np
+import time
+from typing import Dict, Any
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
-
 from ..config.settings import Settings
 from ..utils.helpers import current_timestamp
 
 class FoursquareScraper:
-    """Realiza el scraping de sitios turísticos en Foursquare."""
-
+    """Realiza el scraping de sitios turísticos en Foursquare"""
+    
     def __init__(self):
-        """Inicializa el scraper."""
+        """Inicializa el scraper"""
         self.settings = Settings()
-
-    def load_urls_from_csvs(self, csv_files: list) -> pd.DataFrame:
-        """Carga y concatena las URLs desde una lista de archivos CSV."""
+    
+    def load_urls_from_csvs(self, csv_files: list) -> 'pd.DataFrame':
+        """Carga y concatena las URLs desde una lista de archivos CSV"""
         frames = []
         for csv_path in csv_files:
             try:
@@ -29,97 +29,113 @@ class FoursquareScraper:
         if frames:
             return pd.concat(frames, ignore_index=True)
         return pd.DataFrame()
+    
+    def extract_sites(self, page, url, municipio="", max_retries=None, timeout=None) -> list:
+        max_retries = max_retries or self.settings.RETRIES
+        timeout = timeout or self.settings.TIMEOUT
 
-    def extract_sites_from_zone(self, page: Page, url: str, municipio: str) -> List[Dict[str, Any]]:
-        """
-        Navega a una URL de un municipio, hace clic en 'Buscar en esta zona'
-        y extrae todos los sitios encontrados haciendo scroll.
-
-        Args:
-            page: El objeto Page de Playwright.
-            url: La URL del municipio a procesar.
-            municipio: El nombre del municipio (para logging).
-
-        Returns:
-            Una lista de diccionarios, donde cada diccionario representa un sitio.
-        """
-        print(f"[SCRAPER] Extrayendo sitios para {municipio} desde {url}")
-        sites = []
-        try:
-            page.goto(url, timeout=self.settings.NAV_TIMEOUT)
-            page.wait_for_load_state('domcontentloaded')
-
-            # Hacer clic en "Buscar en esta zona" para asegurar que se carguen los sitios
+        for attempt in range(1, max_retries + 1):
             try:
-                search_button = page.locator('button:has-text("Buscar en esta zona")')
-                search_button.click(timeout=self.settings.CLICK_TIMEOUT)
-                print(f"[SCRAPER] Clic en 'Buscar en esta zona' para {municipio}.")
-                # Esperar a que la nueva lista de resultados se cargue
-                page.wait_for_selector('[data-testid="venue-card"]', timeout=self.settings.WAIT_TIMEOUT)
-            except PlaywrightTimeoutError:
-                print(f"[WARN] No se encontró o no fue necesario hacer clic en 'Buscar en esta zona' para {municipio}.")
-
-            # Lógica de scroll para cargar todos los sitios
-            scroll_container = page.locator('div[aria-label="Resultados de la búsqueda"] >> xpath=..')
-            if not scroll_container.is_visible():
-                 print(f"[WARN] Contenedor de resultados no visible para {municipio}.")
-                 return []
-
-            previous_height = -1
-            consecutive_no_change = 0
-            
-            while consecutive_no_change < self.settings.MAX_SCROLL_NO_CHANGE:
-                current_height = scroll_container.evaluate('(element) => element.scrollHeight')
-                scroll_container.evaluate('(element) => element.scrollTo(0, element.scrollHeight)')
-                page.wait_for_timeout(self.settings.SCROLL_PAUSE)
-
-                if current_height == previous_height:
-                    consecutive_no_change += 1
-                else:
-                    consecutive_no_change = 0
+                print(f"Intento {attempt}/{max_retries} para {municipio} ({url})")
+                page.goto(url, timeout=timeout)
                 
-                previous_height = current_height
+                # Pausa aleatoria post-carga para mitigar bloqueos
+                post_load_wait = int(np.random.uniform(self.settings.POST_LOAD_WAIT_MIN, self.settings.POST_LOAD_WAIT_MAX))
+                page.wait_for_timeout(post_load_wait)
 
-            # Extraer la información de todos los sitios cargados
-            site_cards = page.locator('[data-testid="venue-card"]').all()
-            print(f"[SCRAPER] Se encontraron {len(site_cards)} tarjetas de sitios para {municipio}.")
+                content_selector = self.settings.SELECTORS['content_holder']
+                no_results_selector = self.settings.SELECTORS['no_results_card']
 
-            for card in site_cards:
-                try:
-                    name_element = card.locator('a[data-testid="venue-name"]')
-                    site_name = name_element.inner_text()
-                    site_url = name_element.get_attribute('href')
-                    
-                    address_element = card.locator('div[class*="address-line"]')
-                    address = address_element.inner_text() if address_element.count() > 0 else 'N/A'
+                # Espera a que cargue el contenido principal o el mensaje de "sin resultados"
+                page.locator(f"{content_selector}, {no_results_selector}").first.wait_for(timeout=20000)
 
-                    site_data = {
-                        'name': site_name,
-                        'address': address,
-                        'url': f"https://foursquare.com{site_url}" if site_url else 'N/A',
-                        'municipio_busqueda': municipio,
-                        'fecha_extraccion': current_timestamp()
-                    }
-                    sites.append(site_data)
-                except Exception as e:
-                    print(f"[WARN] No se pudo procesar una tarjeta de sitio en {municipio}: {e}")
-            
-            return sites
+                # Comprueba si la página indica que no hay resultados
+                if page.is_visible(no_results_selector):
+                    print(f"[INFO] Zona vacía para {municipio}. No se encontraron sitios.")
+                    return []  # Devuelve lista vacía y termina, no es un error.
 
-        except PlaywrightTimeoutError:
-            print(f"[ERROR] Timeout durante la navegación o extracción en {municipio}.")
-            self.register_failed_municipality(municipio, url, "timeout_error")
-            return []
-        except Exception as e:
-            print(f"[ERROR] Error inesperado extrayendo sitios para {municipio}: {e}")
-            self.register_failed_municipality(municipio, url, f"unexpected_error: {e}")
-            return []
+                # Si hay resultados, procede con el scraping
+                self._load_all_results(page)
+                sitios_elements = page.query_selector_all(content_selector)
+                
+                sitios_list = []
+                for i, sitio_element in enumerate(sitios_elements):
+                    try:
+                        site_data = self._extract_site_data(sitio_element, i + 1)
+                        sitios_list.append(site_data)
+                    except Exception as e:
+                        print(f"[WARN] No se pudo procesar un sitio en {municipio}: {e}")
+                
+                return sitios_list
 
-    def register_failed_municipality(self, municipio: str, url: str, reason: str):
-        """Registra un municipio que falló en un archivo de texto."""
+            except PlaywrightTimeoutError:
+                print(f"[TIMEOUT] Timeout en intento {attempt} para {municipio}.")
+                if attempt == max_retries:
+                    self.register_failed_municipality(municipio, url, "timeout_final")
+                else:
+                    # Lógica de Backoff Progresivo
+                    wait_time = self.settings.BACKOFF_FACTOR * attempt
+                    print(f"Esperando {wait_time} segundos antes de reintentar...")
+                    time.sleep(wait_time)
+            except Exception as e:
+                print(f"[ERROR] Error inesperado en intento {attempt} para {municipio}: {e}")
+                self.register_failed_municipality(municipio, url, f"error_inesperado: {e}")
+                break # Si el error no es un timeout, no reintentar.
+
+        return []
+
+    def register_failed_municipality(self, municipio, url, reason):
+        failed_path = self.settings.FAILED_MUNICIPALITIES_PATH
+        with open(failed_path, "a", encoding="utf-8") as f:
+            f.write(f"{municipio},{url},{reason},{current_timestamp()}\n")
+        print(f"[FAILED] Municipio registrado: {municipio} ({url}) - Razón: {reason}")
+    
+    def _load_all_results(self, page: Page) -> None:
+        """Hace clic en 'Ver más resultados' hasta que no haya más"""
         try:
-            with open(self.settings.FAILED_MUNICIPALITIES_PATH, "a", encoding="utf-8") as f:
-                f.write(f"{municipio},{url},{reason},{current_timestamp()}\n")
-            print(f"[FAILED] Municipio fallido registrado: {municipio} - Razón: {reason}")
-        except Exception as e:
-            print(f"[ERROR] No se pudo escribir en el archivo de fallos: {e}")
+            while True:
+                boton = page.query_selector(self.settings.SELECTORS['more_results_button'])
+                if boton and boton.is_visible():
+                    boton.click()
+                    page.wait_for_timeout(int(np.random.uniform(self.settings.WAIT_SHORT_MIN, self.settings.WAIT_SHORT_MAX)))
+                else:
+                    break
+        except Exception:
+            pass
+    
+    def _extract_site_data(self, sitio, index: int) -> Dict[str, Any]:
+        """Extrae datos de un sitio individual"""
+        sitio_data = {
+            "id": index,
+            "puntuacion": "N/A",
+            "nombre": "N/A",
+            "categoria": "N/A",
+            "direccion": "N/A",
+            "url_sitio": "",
+            "fecha_extraccion": current_timestamp()
+        }
+        
+        puntuacion_element = sitio.query_selector(self.settings.SELECTORS['venue_score'])
+        if puntuacion_element:
+            sitio_data["puntuacion"] = puntuacion_element.inner_text().strip()
+        
+        nombre_element = sitio.query_selector(self.settings.SELECTORS['venue_name'])
+        if nombre_element:
+            nombre_link = nombre_element.query_selector('a')
+            if nombre_link:
+                sitio_data["nombre"] = nombre_link.inner_text().strip()
+                href = nombre_link.get_attribute('href')
+                if href:
+                    sitio_data["url_sitio"] = f"{self.settings.BASE_URL}{href}" if href.startswith('/') else href
+            else:
+                sitio_data["nombre"] = nombre_element.inner_text().strip()
+        
+        categoria_element = sitio.query_selector(self.settings.SELECTORS['venue_category'])
+        if categoria_element:
+            sitio_data["categoria"] = categoria_element.inner_text().strip().replace('•', '').strip()
+        
+        direccion_element = sitio.query_selector(self.settings.SELECTORS['venue_address'])
+        if direccion_element:
+            sitio_data["direccion"] = direccion_element.inner_text().strip()
+        
+        return sitio_data
