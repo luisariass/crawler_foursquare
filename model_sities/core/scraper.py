@@ -30,7 +30,7 @@ class FoursquareScraper:
             return pd.concat(frames, ignore_index=True)
         return pd.DataFrame()
     
-    def extract_sites(self, page, url, municipio="", max_retries=None, timeout=None) -> list:
+    def extract_sites(self, page, url, municipio="", max_retries=None, timeout=None) -> tuple:
         max_retries = max_retries or self.settings.RETRIES
         timeout = timeout or self.settings.TIMEOUT
 
@@ -39,20 +39,26 @@ class FoursquareScraper:
                 print(f"Intento {attempt}/{max_retries} para {municipio} ({url})")
                 page.goto(url, timeout=timeout)
                 
-                # Pausa aleatoria post-carga para mitigar bloqueos
                 post_load_wait = int(np.random.uniform(self.settings.POST_LOAD_WAIT_MIN, self.settings.POST_LOAD_WAIT_MAX))
                 page.wait_for_timeout(post_load_wait)
 
                 content_selector = self.settings.SELECTORS['content_holder']
                 no_results_selector = self.settings.SELECTORS['no_results_card']
+                generic_error_selector = self.settings.SELECTORS['generic_error_card']
 
-                # Espera a que cargue el contenido principal o el mensaje de "sin resultados"
-                page.locator(f"{content_selector}, {no_results_selector}").first.wait_for(timeout=20000)
+                # Espera a que cargue el contenido principal, el mensaje de "sin resultados" o el error genérico
+                page.locator(f"{content_selector}, {no_results_selector}, {generic_error_selector}").first.wait_for(timeout=20000)
 
-                # Comprueba si la página indica que no hay resultados
-                if page.is_visible(no_results_selector):
+                # Early exit: error genérico (bloqueo del servidor)
+                if page.is_visible(generic_error_selector):
+                    print(f"[BLOCK] Bloqueo del servidor detectado en {municipio}.")
+                    self.register_failed_municipality(municipio, url, "generic_error")
+                    return ("generic_error", [])
+
+                # Early exit: zona vacía
+                elif page.is_visible(no_results_selector):
                     print(f"[INFO] Zona vacía para {municipio}. No se encontraron sitios.")
-                    return []  # Devuelve lista vacía y termina, no es un error.
+                    return ("no_results", [])
 
                 # Si hay resultados, procede con el scraping
                 self._load_all_results(page)
@@ -65,24 +71,23 @@ class FoursquareScraper:
                         sitios_list.append(site_data)
                     except Exception as e:
                         print(f"[WARN] No se pudo procesar un sitio en {municipio}: {e}")
-                
-                return sitios_list
+                return ("success", sitios_list)
 
             except PlaywrightTimeoutError:
                 print(f"[TIMEOUT] Timeout en intento {attempt} para {municipio}.")
                 if attempt == max_retries:
                     self.register_failed_municipality(municipio, url, "timeout_final")
+                    return ("timeout", [])
                 else:
-                    # Lógica de Backoff Progresivo
                     wait_time = self.settings.BACKOFF_FACTOR * attempt
                     print(f"Esperando {wait_time} segundos antes de reintentar...")
                     time.sleep(wait_time)
             except Exception as e:
                 print(f"[ERROR] Error inesperado en intento {attempt} para {municipio}: {e}")
                 self.register_failed_municipality(municipio, url, f"error_inesperado: {e}")
-                break # Si el error no es un timeout, no reintentar.
+                return ("error", [])
 
-        return []
+        return ("error", [])
 
     def register_failed_municipality(self, municipio, url, reason):
         failed_path = self.settings.FAILED_MUNICIPALITIES_PATH
