@@ -26,7 +26,9 @@ class Settings:
     SITIES_OUTPUT_DIR = os.path.join(DATA_DIR, "sities")
     REVIEWS_OUTPUT_DIR = os.path.join(DATA_DIR, "reviewers_sities")
     PROGRESO_PATH = os.path.join(REVIEWS_OUTPUT_DIR, "progress_reviews.json")
-    FAILED_MUNICIPALITIES_PATH = os.path.join(DATA_DIR, "failed_municipalities.txt")
+    FAILED_MUNICIPALITIES_PATH = os.path.join(DATA_DIR, "failed_municipalities.txt") # Archivo para registrar municipios fallidos
+    STOP_FILE_PATH = os.path.join(DATA_DIR, "stop_scraping.flag") # Archivo para controlar la pausa
+
 
     # URLs de Foursquare
     BASE_URL = "https://es.foursquare.com"
@@ -36,20 +38,29 @@ class Settings:
     BROWSER_TYPE = "chromium"  # firefox, chromium, webkit 
     HEADLESS = True # False = firefox con interfaz gráfica, True = sin interfaz gráfica
     
-    # Tiempos de espera (en milisegundos)
-    WAIT_SHORT_MIN = 1000
-    WAIT_SHORT_MAX = 3000
+    # Tiempos de espera (en milisegundos) basados en tu script de reviews
+    # Pausa corta para acciones como paginación o clics secundarios
+    WAIT_SHORT_MIN = 3000
+    WAIT_SHORT_MAX = 5000
+    
+    # Pausa media después de cargar una página principal
     WAIT_MEDIUM_MIN = 5000
-    WAIT_MEDIUM_MAX = 7000
+    WAIT_MEDIUM_MAX = 6000
+    
+    # Pausa larga para usar entre lotes de tareas o en backoff
     WAIT_LONG_MIN = 15000
     WAIT_LONG_MAX = 25000
-    WAIT_EXTRA_LONG_MIN = 30000
+    
+    BLOCK_COOLDOWN_MIN_SECONDS = 30 * 60  # 30 minutos
+    BLOCK_COOLDOWN_MAX_SECONDS = 40 * 60  # 40 minutos
+
+    # Pausa de "enfriamiento" extra larga para evitar bloqueos
+    WAIT_EXTRA_LONG_MIN = 30000 # USADO EN REVIEWS.PY PARA BUSCAR LAS RESEÑAS DE LOS RESEÑANTES
     WAIT_EXTRA_LONG_MAX = 40000
     
-    # Pausa aleatoria post-carga para mitigar bloqueos
-    POST_LOAD_WAIT_MIN = 2500
-    POST_LOAD_WAIT_MAX = 5000
-    
+    # Pausa aleatoria post-carga (usaremos la pausa media)
+    POST_LOAD_WAIT_MIN = 5000
+    POST_LOAD_WAIT_MAX = 6000
     # Configuración de procesamiento
     SAVE_INTERVAL = 5  # Guardar cada 5 URLs procesadas
     RETRIES = 3  # Número de reintentos al fallar una URL
@@ -68,7 +79,8 @@ class Settings:
         'login_username': 'input[id="username"]',
         'login_password': 'input[id="password"]',
         'login_button': 'input[id="loginFormButton"]',
-        'no_results_card': 'li.card.noResults'
+        'no_results_card': 'li.card.noResults',
+        'generic_error_card': 'li.card.genericError'
     }
     
     @classmethod
