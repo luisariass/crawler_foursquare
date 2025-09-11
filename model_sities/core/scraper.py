@@ -39,8 +39,24 @@ class FoursquareScraper:
                 print(f"Intento {attempt}/{max_retries} para {municipio} ({url})")
                 page.goto(url, timeout=timeout)
                 
-                post_load_wait = int(np.random.uniform(self.settings.POST_LOAD_WAIT_MIN, self.settings.POST_LOAD_WAIT_MAX))
-                page.wait_for_timeout(post_load_wait)
+                # --- INICIO DE LA LÓGICA PARA EL BOTÓN DEL MAPA ---
+                
+                # Paso 1: Buscar y presionar el botón "Buscar en esta área" si existe.
+                map_search_button_selector = self.settings.SELECTORS['map_search_button']
+                
+                # Damos un tiempo corto para que el botón aparezca si es que va a aparecer.
+                try:
+                    page.locator(map_search_button_selector).wait_for(timeout=7000) # Espera hasta 7 segundos
+                    if page.is_visible(map_search_button_selector):
+                        print(f"[INFO] Botón 'Buscar en esta área' encontrado. Presionando...")
+                        page.click(map_search_button_selector)
+                        # Esperamos un poco después del clic para que los resultados empiecen a cargar.
+                        page.wait_for_timeout(3000)
+                except PlaywrightTimeoutError:
+                    # Si el botón no aparece en 7 segundos, asumimos que no es necesario y continuamos.
+                    print(f"[INFO] Botón 'Buscar en esta área' no encontrado, continuando con la carga normal.")
+                
+                # --- FIN DE LA LÓGICA PARA EL BOTÓN DEL MAPA ---
 
                 content_selector = self.settings.SELECTORS['content_holder']
                 no_results_selector = self.settings.SELECTORS['no_results_card']
