@@ -80,7 +80,8 @@ class Settings:
         'login_password': 'input[id="password"]',
         'login_button': 'input[id="loginFormButton"]',
         'no_results_card': 'li.card.noResults',
-        'generic_error_card': 'li.card.genericError'
+        'generic_error_card': 'li.card.genericError',
+        'map_search_button': 'div.leaflet-control-requery.leaflet-control.active' # <-- ¡NUEVO! Selector para "Buscar en esta área"
     }
     
     @classmethod
