@@ -59,24 +59,43 @@ class DataHandler:
         }
     
     def save_municipio_data(self, municipio: str) -> bool:
-        """Guarda los datos de un municipio específico"""
+        """Guarda los datos de un municipio específico haciendo merge incremental para no perder datos previos."""
         if municipio not in self.all_sitios or not self.all_sitios[municipio]:
             return False
-        
+
+        archivo_municipio = os.path.join(self.output_dir, f'sitios_{municipio}.json')
+        sitios_previos = []
+
+        # Leer datos previos si existen
+        if os.path.exists(archivo_municipio):
+            try:
+                with open(archivo_municipio, 'r', encoding='utf-8') as file:
+                    datos_previos = json.load(file)
+                    sitios_previos = datos_previos.get("sitios_turisticos", [])
+            except Exception:
+                sitios_previos = []
+
+        # Crear set de URLs previas para evitar duplicados
+        urls_previas = set(s.get("url_sitio") for s in sitios_previos if "url_sitio" in s)
+        sitios_final = sitios_previos.copy()
+
+        # Agregar solo los sitios nuevos que no estén en los previos
+        for sitio in self.all_sitios[municipio]:
+            if sitio.get("url_sitio") not in urls_previas:
+                sitios_final.append(sitio)
+                urls_previas.add(sitio.get("url_sitio"))
+
         datos = {
             "municipio": municipio,
-            "sitios_turisticos": self.all_sitios[municipio],
-            "total": len(self.all_sitios[municipio]),
+            "sitios_turisticos": sitios_final,
+            "total": len(sitios_final),
             "fecha_extraccion": current_timestamp(),
             "url_procesada": self.processed_urls.get(municipio, {})
         }
-        
-        archivo_municipio = os.path.join(self.output_dir, f'sitios_{municipio}.json')
-        
+
         try:
             with open(archivo_municipio, 'w', encoding='utf-8') as file:
                 json.dump(datos, file, ensure_ascii=False, indent=4)
-            # Solo mostrar mensaje si hay error, no en cada guardado
             return True
         except Exception as e:
             print(f"[ERROR] No se pudo guardar datos de {municipio}: {e}")
