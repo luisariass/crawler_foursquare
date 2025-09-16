@@ -21,7 +21,7 @@ class DataHandler:
         """Asegura que exista el directorio de salida"""
         os.makedirs(self.output_dir, exist_ok=True)
     
-    def add_sites(self, municipio: str, sites: List[Dict], processing_index: int) -> Dict[str, int]:
+    def Add_sites(self, municipio: str, sites: List[Dict], processing_index: int) -> Dict[str, int]:
         """
         Añade sitios a un municipio, evitando duplicados.
         """
@@ -50,7 +50,7 @@ class DataHandler:
             'total_sites': len(self.all_sitios[municipio])
         }
     
-    def update_processed_url(self, municipio: str, url: str, stats: Dict[str, Any]) -> None:
+    def Update_processed_url(self, municipio: str, url: str, stats: Dict[str, Any]) -> None:
         """Actualiza la información de una URL procesada"""
         self.processed_urls[municipio] = {
             'url': url,
@@ -58,8 +58,8 @@ class DataHandler:
             **stats
         }
     
-    def save_municipio_data(self, municipio: str) -> bool:
-        """Guarda los datos de un municipio específico haciendo merge incremental para no perder datos previos."""
+    def Save_municipio_data(self, municipio: str) -> bool:
+        """Guarda los datos de un municipio haciendo merge incremental para no perder datos previos."""
         if municipio not in self.all_sitios or not self.all_sitios[municipio]:
             return False
 
@@ -100,8 +100,8 @@ class DataHandler:
         except Exception as e:
             print(f"[ERROR] No se pudo guardar datos de {municipio}: {e}")
             return False
-    
-    def save_all_data(self) -> bool:
+            
+    def Save_all_data(self) -> bool:
         """Guarda los datos de todos los municipios procesados"""
         try:
             for municipio in self.all_sitios.keys():
@@ -127,7 +127,7 @@ class DataHandler:
             print(f"[ERROR] No se pudo guardar el resumen general: {e}")
             return False
     
-    def get_statistics(self) -> Dict[str, Any]:
+    def Get_statistics(self) -> Dict[str, Any]:
         """Obtiene estadísticas actuales de los datos"""
         total_sitios = sum(len(sitios) for sitios in self.all_sitios.values())
         return {
