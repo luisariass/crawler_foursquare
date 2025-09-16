@@ -193,8 +193,8 @@ class FoursquareScraperApp:
             return False
         finally:
             print("\n[INFO] Guardando datos finales.")
-            self.data_handler.save_all_data()
-            stats = self.data_handler.get_statistics()
+            self.data_handler.Save_all_data()
+            stats = self.data_handler.Get_statistics()
             print(f"[INFO] Fin del programa. Total de sitios extraídos: {stats['total_sites']}")
             print(f"[INFO] Municipios procesados: {stats['municipalities']}")
 
@@ -205,7 +205,7 @@ def main():
     parser.add_argument('--end', type=int, help='Índice final para procesar URLs')
     parser.add_argument('--all', action='store_true', help='Procesar todas las URLs')
     parser.add_argument('--csv', type=str, nargs='*', help='Ruta(s) de archivo(s) CSV a procesar')
-
+    #arg = python -m model_sities.sities_fetcher --csv path
     args = parser.parse_args()
     
     app = FoursquareScraperApp()
