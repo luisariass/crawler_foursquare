@@ -15,30 +15,8 @@ from .core.auth import FoursquareAuth
 from .core.scraper import FoursquareScraper
 from .core.data_handler import DataHandler
 from .utils.helpers import print_progress
+from .utils.block_helper import handle_cooldown
 
-# --- Configuración para simulación de comportamiento humano ---
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/118.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
-]
-VIEWPORTS = [
-    {'width': 1920, 'height': 1080},
-    {'width': 1366, 'height': 768},
-    {'width': 1536, 'height': 864}
-]
-
-def handle_cooldown(settings: Settings):
-    """
-    Si el archivo de parada existe, el worker entra en un período de enfriamiento.
-    """
-    if os.path.exists(settings.STOP_FILE_PATH):
-        cooldown_duration = int(random.uniform(
-            settings.BLOCK_COOLDOWN_MIN_SECONDS,
-            settings.BLOCK_COOLDOWN_MAX_SECONDS
-        ))
-        print(f"[COOLDOWN] Worker pausado por {cooldown_duration / 60:.1f} minutos debido a un bloqueo detectado.")
-        time.sleep(cooldown_duration)
 
 def worker_process(task_info: dict):
     """
@@ -62,8 +40,8 @@ def worker_process(task_info: dict):
         try:
             browser = getattr(p, settings.BROWSER_TYPE).launch(headless=settings.HEADLESS)
             context = browser.new_context(
-                user_agent=random.choice(USER_AGENTS),
-                viewport=random.choice(VIEWPORTS)
+                user_agent=random.choice(settings.USER_AGENTS),
+                viewport=random.choice(settings.VIEWPORTS)
             )
             page = context.new_page()
 
@@ -111,7 +89,7 @@ class FoursquareScraperApp:
         """Inicializa la aplicación"""
         self.settings = Settings()
         self.scraper = FoursquareScraper()
-        self.data_handler = DataHandler(output_dir=self.settings.SITIES_OUTPUT_DIR)
+        self.data_handler = DataHandler()
     
     def run(self, start_index: int = 0, end_index: int = None, process_all: bool = False, csv_files: list = None) -> bool:
         """
@@ -162,7 +140,7 @@ class FoursquareScraperApp:
                     sitios_encontrados = result.get('sites', [])
 
                     if status == 'success':
-                        stats = self.data_handler.add_sites(municipio, sitios_encontrados, processed_count)
+                        stats = self.data_handler.add_sites(municipio, sitios_encontrados)
                         self.data_handler.update_processed_url(municipio, url, {
                             'sitios_encontrados': stats['new_sites'],
                             'sitios_duplicados_omitidos': stats['duplicates_omitted']
@@ -193,10 +171,14 @@ class FoursquareScraperApp:
             return False
         finally:
             print("\n[INFO] Guardando datos finales.")
-            self.data_handler.Save_all_data()
-            stats = self.data_handler.Get_statistics()
-            print(f"[INFO] Fin del programa. Total de sitios extraídos: {stats['total_sites']}")
-            print(f"[INFO] Municipios procesados: {stats['municipalities']}")
+            self.data_handler.save_all_data()
+            stats = self.data_handler.get_statistics()
+            # Acceder a las estadísticas de sitios correctamente
+            sites_stats = stats.get('sites_stats', {})
+            total_sites = sites_stats.get('total_sites', 0)
+            municipalities = sites_stats.get('municipalities', [])
+            print(f"[INFO] Fin del programa. Total de sitios extraídos: {total_sites}")
+            print(f"[INFO] Municipios procesados: {municipalities}")
 
 def main():
     """Punto de entrada principal con argumentos de línea de comandos"""
