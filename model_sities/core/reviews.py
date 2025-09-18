@@ -1,143 +1,171 @@
 """
-Clase para extraer las URLs de los perfiles de los reseñantes de un sitio.
-Sigue el mismo patrón de diseño resiliente y sin estado que scraper.py.
+Scraper de Foursquare que EXTRAe SOLO perfiles de usuario:
+  - user_name (texto del <a> del autor)
+  - user_url  (href absoluto del perfil)
+
+Incluye:
+- Detección de bloqueo por HTML ("Sorry! We're having technical difficulties.")
+- Pausa aleatoria + reload si hay bloqueo
+- Esperas por capas sin mezclar engines de selector
+- Click en "Recientes" con varios fallbacks (no bloqueante)
+- Reintentos con backoff
+- No guarda a disco: delega el guardado al DataHandler
 """
+
 import time
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from ..config.settings import Settings
-from ..utils.helpers import current_timestamp
+from ..utils.helpers import current_timestamp  # si lo usas en logs/razones
 
 
 class FoursquareReviewerScraper:
     """
-    Extrae las URLs de los perfiles de los reseñantes de un sitio en Foursquare.
+    Extrae SOLO perfiles de usuario (user_name, user_url) de un sitio Foursquare.
     """
 
     def __init__(self) -> None:
-        """Inicializa el scraper de URLs de reseñantes."""
         self.settings = Settings()
 
-    def extract_reviewer_urls(
+    def extract_reviews(
         self,
         page: Page,
         site_url: str,
-        site_id: str
-    ) -> Tuple[str, List[Dict[str, str]]]:
+        site_id: str,
+    ) -> Tuple[str, List[Dict[str, Any]]]:
         """
-        Extrae las URLs de los perfiles de los reseñantes de un sitio.
-
-        Aplica un bucle de reintentos y detección de estados para robustez.
-
-        Args:
-            page: La instancia de la página de Playwright.
-            site_url: La URL del sitio a procesar.
-            site_id: El ID del sitio para logging y contexto.
-
-        Returns:
-            Una tupla con el estado ('success', 'no_results', 'error', etc.)
-            y una lista de diccionarios, cada uno con la URL del perfil.
+        Retorna:
+          - estado: 'success' | 'no_results' | 'timeout' | 'generic_error' | 'error'
+          - data:  [{ "user_name": str, "user_url": str }, ...]
         """
+        BLOCK_TEXT = "Sorry! We're having technical difficulties."
+        reviews_container_selector = "div.tipSection"
+        no_reviews_selector = ".noTips"
+
         for attempt in range(1, self.settings.RETRIES + 1):
             try:
-                print(
-                    f"Intento {attempt}/{self.settings.RETRIES} para sitio ID: "
-                    f"{site_id}"
-                )
+                print(f"[TRY] {attempt}/{self.settings.RETRIES} -> {site_id}")
                 page.goto(site_url, timeout=self.settings.TIMEOUT)
                 page.wait_for_timeout(int(np.random.uniform(3000, 5000)))
 
-                # --- Detección de Múltiples Estados ---
-                reviews_container_selector = '.tipSection'
-                no_reviews_selector = '.noTips'
-                error_selector = self.settings.SELECTORS['generic_error_card']
+                # 1) Detección de bloqueo por HTML (robusto)
+                html = page.content()
+                if BLOCK_TEXT in html:
+                    print("[BLOCK] Banner detectado. Pausa y reload…")
+                    page.wait_for_timeout(
+                        int(np.random.uniform(
+                            self.settings.WAIT_EXTRA_LONG_MIN,
+                            self.settings.WAIT_EXTRA_LONG_MAX
+                        )) * 5  # pausa larga (similar a tu extractor)
+                    )
+                    page.reload()
+                    page.wait_for_timeout(int(np.random.uniform(2000, 4000)))
+                    if BLOCK_TEXT in page.content():
+                        # No tumbar el job superior: solo marca el sitio con generic_error
+                        return ("generic_error", [])
 
-                page.locator(
-                    f"{reviews_container_selector}, {no_reviews_selector}, "
-                    f"{error_selector}"
-                ).first.wait_for(timeout=20000)
+                # 2) Espera por “aparición” de algún estado conocido (sin mezclar engines)
+                appeared = False
+                for _ in range(20):  # ~2s (20 * 100ms)
+                    if page.locator(reviews_container_selector).count() > 0:
+                        appeared = True; break
+                    if page.locator(no_reviews_selector).count() > 0:
+                        appeared = True; break
+                    if page.get_by_text(BLOCK_TEXT, exact=True).count() > 0:
+                        appeared = True; break
+                    page.wait_for_timeout(100)
 
-                # 1. Estado: Error genérico (bloqueo)
-                if page.is_visible(error_selector):
-                    print(f"[BLOCK] Bloqueo del servidor en sitio {site_id}")
-                    self._register_failed_site(site_id, site_url, "generic_error")
+                # 3) Intento de ordenar por "Recientes" (no bloqueante si falla)
+                try:
+                    clicked = False
+                    # a) Accesible/rol
+                    btn_role = page.get_by_role("button", name="Recientes")
+                    if btn_role and btn_role.is_visible():
+                        btn_role.click(timeout=1500); clicked = True
+                    # b) CSS con :has-text()
+                    if not clicked:
+                        css = "span.sortLink:has-text('Recientes')"
+                        loc = page.locator(css).first
+                        if loc.is_visible():
+                            loc.click(timeout=1500); clicked = True
+                    # c) XPath (como en tu extractor)
+                    if not clicked:
+                        xp = '//span[contains(@class,"sortLink") and contains(text(),"Recientes")]'
+                        loc = page.locator(xp).first
+                        if loc.is_visible():
+                            loc.click(timeout=1500); clicked = True
+                    if clicked:
+                        print("[INFO] Aplicado orden 'Recientes'.")
+                        page.wait_for_timeout(int(np.random.uniform(1500, 3000)))
+                except Exception as e:
+                    print(f"[WARN] No se pudo clickear 'Recientes': {e}")
+
+                # 4) Estados finales
+                if page.get_by_text(BLOCK_TEXT, exact=True).is_visible():
                     return ("generic_error", [])
 
-                # 2. Estado: Sin resultados (mensaje explícito)
-                elif page.is_visible(no_reviews_selector):
-                    print(f"[INFO] No hay tips/reseñas para el sitio {site_id}.")
-                    return ("no_results", [])
+                if page.locator(no_reviews_selector).is_visible():
+                    # Aun así, intentamos extraer por si hay perfiles en otra zona
+                    data = self._extract_user_profiles_from_page(page)
+                    # Si no hay nada, es no_results; si hay algo, mejor reportarlo
+                    return ("no_results" if not data else "success", data)
 
-                # 3. Estado: Éxito, hay contenedor de reseñas
-                elif page.is_visible(reviews_container_selector):
-                    reviewer_urls = self._extract_urls_from_page(page)
-                    if not reviewer_urls:
-                        print(
-                            f"[INFO] Contenedor de tips encontrado, pero no "
-                            f"se extrajeron URLs de reseñantes para {site_id}."
-                        )
-                        return ("no_results", [])
+                # 5) Extracción mínima de usuarios
+                has_container = page.locator(reviews_container_selector).count() > 0
+                has_tips = len(page.query_selector_all("div.tipContents")) > 0
+                if has_container or has_tips:
+                    data = self._extract_user_profiles_from_page(page)
+                    return ("success", data)
 
-                    return ("success", reviewer_urls)
+                # Si nada claro, breve espera y reintento
+                print("[INFO] Estado incierto; reintento suave…")
+                page.wait_for_timeout(int(np.random.uniform(500, 1200)))
 
             except PlaywrightTimeoutError:
-                print(f"[TIMEOUT] Timeout en intento {attempt} para {site_id}.")
+                print(f"[TIMEOUT] intento {attempt} sitio {site_id}")
                 if attempt == self.settings.RETRIES:
-                    self._register_failed_site(site_id, site_url, "timeout_final")
                     return ("timeout", [])
                 time.sleep(self.settings.BACKOFF_FACTOR * attempt)
 
             except Exception as e:
-                print(f"[ERROR] Error inesperado para sitio {site_id}: {e}")
-                self._register_failed_site(site_id, site_url, f"error: {e}")
+                print(f"[ERROR] inesperado en {site_id}: {e}")
                 return ("error", [])
 
         return ("error", [])
 
-    def _extract_urls_from_page(self, page: Page) -> List[Dict[str, str]]:
+    # -----------------------
+    # Helpers
+    # -----------------------
+
+    def _extract_user_profiles_from_page(self, page: Page) -> List[Dict[str, str]]:
         """
-        Extrae las URLs de los perfiles de la página actual.
-        Intenta hacer clic en 'Recientes' si está disponible.
+        Devuelve SOLO:
+          - user_name (texto del enlace del usuario)
+          - user_url  (href absoluto al perfil)
+
+        Estas claves son las que espera tu UsersStorageStrategy/DataHandler:
+          - unique id: user_url
+          - data key en archivo: perfiles_usuarios
         """
-        # --- Lógica Generalizada para Casos 2 y 3 ---
-        # Intenta hacer clic en el botón "Recientes" si existe, pero no falla si no está.
-        try:
-            recientes_btn_selector = '//span[contains(@class, "sortLink") and contains(text(), "Recientes")]'
-            if page.query_selector(recientes_btn_selector):
-                page.click(recientes_btn_selector)
-                print("[INFO] Botón 'Recientes' encontrado y clickeado.")
-                page.wait_for_timeout(int(np.random.uniform(2000, 4000)))
-        except Exception as e:
-            # Este error no es crítico, solo informativo.
-            print(f"[WARN] No se pudo hacer clic en 'Recientes': {e}")
+        results: List[Dict[str, str]] = []
 
-        # Ahora, extrae todos los enlaces de usuario visibles en la página.
-        reviewer_link_selector = 'span.userName a'
-        reviewer_links = page.query_selector_all(reviewer_link_selector)
+        anchors = page.query_selector_all("span.userName a")
+        for a in anchors:
+            name = (a.inner_text() or "").strip()
+            href = a.get_attribute("href") or ""
+            if href.startswith("/"):
+                href = f"{self.settings.BASE_URL}{href}"
+            if name or href:
+                results.append({"user_name": name, "user_url": href})
 
-        urls = []
-        base_url = self.settings.BASE_URL
-
-        for link in reviewer_links:
-            href = link.get_attribute('href')
-            if href:
-                full_url = f"{base_url}{href}" if href.startswith('/') else href
-                urls.append({'user_url': full_url})
-
-        # Eliminar duplicados basados en 'user_url'
-        unique_urls = list({item['user_url']: item for item in urls}.values())
-        return unique_urls
-
-    def _register_failed_site(
-        self,
-        site_id: str,
-        site_url: str,
-        reason: str
-    ) -> None:
-        """Registra un sitio que falló en la extracción de URLs de reseñantes."""
-        failed_path = self.settings.FAILED_REVIEW_SITES_PATH
-        with open(failed_path, "a", encoding="utf-8") as f:
-            f.write(f"{site_id},{site_url},{reason},{current_timestamp()}\n")
-        print(f"[FAILED] Sitio de reseña registrado: {site_id} - Razón: {reason}")
+        # (Opcional) dedupe rápido por user_url dentro de la misma página:
+        seen = set()
+        uniq = []
+        for it in results:
+            url = it.get("user_url", "")
+            if url and url not in seen:
+                uniq.append(it)
+                seen.add(url)
+        return uniq
