@@ -1,116 +1,143 @@
-import os
-import json
+"""
+Clase para extraer las URLs de los perfiles de los reseñantes de un sitio.
+Sigue el mismo patrón de diseño resiliente y sin estado que scraper.py.
+"""
+import time
 import numpy as np
-import pandas as pd
-from playwright.sync_api import Page
+from typing import Dict, List, Tuple
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
+
 from ..config.settings import Settings
+from ..utils.helpers import current_timestamp
 
-def guardar_progreso(idx_actual, csv_path, sitios_bloqueados):
-    progreso = {
-        "csv_path": csv_path,
-        "idx_actual": idx_actual,
-        "sitios_bloqueados": sitios_bloqueados
-    }
-    with open(Settings.PROGRESO_PATH, "w", encoding="utf-8") as f:
-        json.dump(progreso, f, ensure_ascii=False, indent=4)
-    print(f"Progreso guardado en {Settings.PROGRESO_PATH}")
 
-def cargar_progreso():
-    if os.path.exists(Settings.PROGRESO_PATH):
-        with open(Settings.PROGRESO_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return None
-
-class FoursquareReviewsExtractor:
+class FoursquareReviewerScraper:
     """
-    Extrae reseñas de sitios turísticos usando Playwright, leyendo URLs desde archivos CSV.
+    Extrae las URLs de los perfiles de los reseñantes de un sitio en Foursquare.
     """
 
-    def __init__(self, output_dir="reseñas_sitios"):
+    def __init__(self) -> None:
+        """Inicializa el scraper de URLs de reseñantes."""
         self.settings = Settings()
-        self.output_dir = output_dir
-        os.makedirs(self.output_dir, exist_ok=True)
 
-    def extract_reviews_from_csv(self, page: Page, csv_path):
-        df = pd.read_csv(csv_path)
-        progreso = cargar_progreso()
-        start_idx = 0
+    def extract_reviewer_urls(
+        self,
+        page: Page,
+        site_url: str,
+        site_id: str
+    ) -> Tuple[str, List[Dict[str, str]]]:
+        """
+        Extrae las URLs de los perfiles de los reseñantes de un sitio.
 
-        if progreso and progreso["csv_path"] == csv_path:
-            start_idx = progreso["idx_actual"]
-            print(f"Reanudando desde el sitio {start_idx} en {csv_path}")
+        Aplica un bucle de reintentos y detección de estados para robustez.
 
-        for idx, row in enumerate(df.itertuples(), start=0):
-            if idx < start_idx:
-                continue
+        Args:
+            page: La instancia de la página de Playwright.
+            site_url: La URL del sitio a procesar.
+            site_id: El ID del sitio para logging y contexto.
 
-            url = getattr(row, "url_sitio", None)
-            nombre = getattr(row, "nombre", f"sitio_{idx}")
-            municipio = getattr(row, "municipio", "desconocido")
-            if not isinstance(url, str) or not url.startswith("http"):
-                continue
+        Returns:
+            Una tupla con el estado ('success', 'no_results', 'error', etc.)
+            y una lista de diccionarios, cada uno con la URL del perfil.
+        """
+        for attempt in range(1, self.settings.RETRIES + 1):
+            try:
+                print(
+                    f"Intento {attempt}/{self.settings.RETRIES} para sitio ID: "
+                    f"{site_id}"
+                )
+                page.goto(site_url, timeout=self.settings.TIMEOUT)
+                page.wait_for_timeout(int(np.random.uniform(3000, 5000)))
 
-            print(f"Extrayendo reseñas de: {nombre} ({url})")
-            reviews = self._extract_reviews_from_site(page, url, nombre)
+                # --- Detección de Múltiples Estados ---
+                reviews_container_selector = '.tipSection'
+                no_reviews_selector = '.noTips'
+                error_selector = self.settings.SELECTORS['generic_error_card']
 
-            if reviews == "BLOQUEADO":
-                print("Bloqueo detectado. Guardando progreso y deteniendo el scraper.")
-                guardar_progreso(idx, csv_path, [])
-                return  # Detener el scraper aquí
+                page.locator(
+                    f"{reviews_container_selector}, {no_reviews_selector}, "
+                    f"{error_selector}"
+                ).first.wait_for(timeout=20000)
 
-            # --- GUARDAR LAS RESEÑAS EXTRAÍDAS ---
-            ciudad_dir = os.path.join(self.output_dir, municipio)
-            os.makedirs(ciudad_dir, exist_ok=True)
-            nombre_archivo = f"reseñas_sitio_{nombre.replace(' ', '_').replace('/', '_')}.json"
-            path_out = os.path.join(ciudad_dir, nombre_archivo)
-            with open(path_out, "w", encoding="utf-8") as f_out:
-                json.dump(reviews, f_out, ensure_ascii=False, indent=4)
-            print(f"  Reseñas guardadas en: {path_out}")
+                # 1. Estado: Error genérico (bloqueo)
+                if page.is_visible(error_selector):
+                    print(f"[BLOCK] Bloqueo del servidor en sitio {site_id}")
+                    self._register_failed_site(site_id, site_url, "generic_error")
+                    return ("generic_error", [])
 
-            # --- GUARDAR PROGRESO DESPUÉS DE CADA SITIO ---
-            guardar_progreso(idx + 1, csv_path, [])
+                # 2. Estado: Sin resultados (mensaje explícito)
+                elif page.is_visible(no_reviews_selector):
+                    print(f"[INFO] No hay tips/reseñas para el sitio {site_id}.")
+                    return ("no_results", [])
 
-    def _extract_reviews_from_site(self, page: Page, url: str, nombre_sitio: str):
-        page.goto(url)
-        page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_MEDIUM_MIN, Settings.WAIT_MEDIUM_MAX)))
-        # Detector de bloqueo
-        if "Sorry! We're having technical difficulties." in page.content():
-            print("Bloqueo detectado. Pausando scraping por 10 minutos...")
-            page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_EXTRA_LONG_MIN, Settings.WAIT_EXTRA_LONG_MAX)) * 5)  # 10 minutos aprox
-            page.reload()
-            page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_MEDIUM_MIN, Settings.WAIT_MEDIUM_MAX)))
-            if "Sorry! We're having technical difficulties." in page.content():
-                print("El bloqueo persiste tras la pausa.")
-                return "BLOQUEADO"
+                # 3. Estado: Éxito, hay contenedor de reseñas
+                elif page.is_visible(reviews_container_selector):
+                    reviewer_urls = self._extract_urls_from_page(page)
+                    if not reviewer_urls:
+                        print(
+                            f"[INFO] Contenedor de tips encontrado, pero no "
+                            f"se extrajeron URLs de reseñantes para {site_id}."
+                        )
+                        return ("no_results", [])
 
-        # Intentar hacer clic en el filtro "Recientes" si existe
+                    return ("success", reviewer_urls)
+
+            except PlaywrightTimeoutError:
+                print(f"[TIMEOUT] Timeout en intento {attempt} para {site_id}.")
+                if attempt == self.settings.RETRIES:
+                    self._register_failed_site(site_id, site_url, "timeout_final")
+                    return ("timeout", [])
+                time.sleep(self.settings.BACKOFF_FACTOR * attempt)
+
+            except Exception as e:
+                print(f"[ERROR] Error inesperado para sitio {site_id}: {e}")
+                self._register_failed_site(site_id, site_url, f"error: {e}")
+                return ("error", [])
+
+        return ("error", [])
+
+    def _extract_urls_from_page(self, page: Page) -> List[Dict[str, str]]:
+        """
+        Extrae las URLs de los perfiles de la página actual.
+        Intenta hacer clic en 'Recientes' si está disponible.
+        """
+        # --- Lógica Generalizada para Casos 2 y 3 ---
+        # Intenta hacer clic en el botón "Recientes" si existe, pero no falla si no está.
         try:
-            recientes_btn = page.query_selector('//span[contains(@class, "sortLink") and contains(text(), "Recientes")]')
-            if recientes_btn:
-                recientes_btn.click()
-                page.wait_for_timeout(int(np.random.uniform(Settings.WAIT_SHORT_MIN, Settings.WAIT_SHORT_MAX)))
-        except Exception:
-            pass
+            recientes_btn_selector = '//span[contains(@class, "sortLink") and contains(text(), "Recientes")]'
+            if page.query_selector(recientes_btn_selector):
+                page.click(recientes_btn_selector)
+                print("[INFO] Botón 'Recientes' encontrado y clickeado.")
+                page.wait_for_timeout(int(np.random.uniform(2000, 4000)))
+        except Exception as e:
+            # Este error no es crítico, solo informativo.
+            print(f"[WARN] No se pudo hacer clic en 'Recientes': {e}")
 
-        # Extraer reseñas visibles
-        reviews = []
-        review_elements = page.query_selector_all('div.tipContents')
-        for tip in review_elements:
-            contenido = tip.query_selector('div.tipText')
-            usuario_tag = tip.query_selector('span.userName a')
-            usuario_nombre = usuario_tag.inner_text().strip() if usuario_tag else ""
-            perfil_url_usuario = usuario_tag.get_attribute('href') if usuario_tag else ""
-            if perfil_url_usuario and perfil_url_usuario.startswith('/'):
-                perfil_url_usuario = f"{Settings.BASE_URL}{perfil_url_usuario}"
-            fecha = tip.query_selector('span.tipDate')
-            review = {
-                "usuario": usuario_nombre,
-                "contenido": contenido.inner_text().strip() if contenido else "",
-                "fecha_reseña": fecha.inner_text().strip() if fecha else "",
-                "lugar": nombre_sitio,
-                "perfil_url_usuario": perfil_url_usuario,
-                "perfil_url": url
-            }
-            reviews.append(review)
-        print(f"  Total reseñas extraídas: {len(reviews)}")
-        return reviews
+        # Ahora, extrae todos los enlaces de usuario visibles en la página.
+        reviewer_link_selector = 'span.userName a'
+        reviewer_links = page.query_selector_all(reviewer_link_selector)
+
+        urls = []
+        base_url = self.settings.BASE_URL
+
+        for link in reviewer_links:
+            href = link.get_attribute('href')
+            if href:
+                full_url = f"{base_url}{href}" if href.startswith('/') else href
+                urls.append({'user_url': full_url})
+
+        # Eliminar duplicados basados en 'user_url'
+        unique_urls = list({item['user_url']: item for item in urls}.values())
+        return unique_urls
+
+    def _register_failed_site(
+        self,
+        site_id: str,
+        site_url: str,
+        reason: str
+    ) -> None:
+        """Registra un sitio que falló en la extracción de URLs de reseñantes."""
+        failed_path = self.settings.FAILED_REVIEW_SITES_PATH
+        with open(failed_path, "a", encoding="utf-8") as f:
+            f.write(f"{site_id},{site_url},{reason},{current_timestamp()}\n")
+        print(f"[FAILED] Sitio de reseña registrado: {site_id} - Razón: {reason}")
