@@ -1,88 +1,27 @@
 """
 Orquestador principal para extraer perfiles de usuario de los sitios turísticos.
-Lee sitios desde sitios_*.json, procesa en paralelo y guarda resultados incrementales.
+Lee sitios desde sitios_*.json, procesa en paralelo y guarda resultados incrementales
+en subdirectorios por municipio, cada archivo JSON por sitio.
 """
 
 import os
 import glob
 import json
-import random
 import argparse
 import signal
-from typing import List, Dict, Any
-from multiprocessing import Pool, Event
-from playwright.sync_api import sync_playwright
-
+from typing import List, Dict
+from multiprocessing import Pool
 from .config.settings import Settings
-from .core.auth import FoursquareAuth
-from .core.reviews import FoursquareReviewerScraper
-from .core.data_handler import DataHandler
 from .utils.helpers import print_progress, current_timestamp
-
-# --- Lógica para apagado controlado (graceful shutdown) ---
-shutdown_event = Event()
-
-
-def init_worker():
-    """Inicializador para que cada worker ignore la señal de interrupción."""
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-
-def worker_process(task_info: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Proceso worker que extrae los perfiles de usuario de un sitio.
-    """
-    if shutdown_event.is_set():
-        return {"status": "shutdown", "site_id": task_info.get('id', 'unknown')}
-
-    settings = Settings()
-    site_data = task_info['site_data']
-    site_id = site_data.get('id', 'unknown_id')
-    site_url = site_data.get('url_sitio', '')
-    site_name = site_data.get('nombre', 'nombre_desconocido')
-
-    if not site_url:
-        return {"status": "no_url", "site_id": site_id, "reviews": []}
-
-    try:
-        with sync_playwright() as p:
-            browser = getattr(p, settings.BROWSER_TYPE).launch(
-                headless=settings.HEADLESS
-            )
-            context = browser.new_context(
-                user_agent=random.choice(settings.USER_AGENTS),
-                viewport=random.choice(settings.VIEWPORTS)
-            )
-            page = context.new_page()
-
-            # Si tu scraping requiere login, mantenlo; si no, podrías omitirlo.
-            auth = FoursquareAuth()
-            if not auth.login(page):
-                return {"status": "auth_error", "site_id": site_id, "reviews": []}
-
-            scraper = FoursquareReviewerScraper()
-            status, reviews = scraper.extract_reviews(
-                page, site_url, str(site_id), site_name
-            )
-
-            browser.close()
-            return {
-                "status": status,
-                "site_id": str(site_id),
-                "site_url": site_url,
-                "reviews": reviews  # [{user_name, user_url}, ...]
-            }
-    except Exception as e:
-        print(f"[WORKER ERROR] Error fatal en sitio {site_id}: {e}")
-        return {"status": "worker_error", "site_id": site_id, "reviews": []}
-
+from .utils.worker_helper import init_worker, worker_process, shutdown_event
 
 class ReviewerFetcherApp:
-    """Aplicación para coordinar la extracción."""
+    """Aplicación para coordinar la extracción y guardado por municipio/sitio."""
 
     def __init__(self):
         self.settings = Settings()
-        self.data_handler = DataHandler()
+        self.output_dir = os.path.join(self.settings.REVIEWS_OUTPUT_DIR)
+        os.makedirs(self.output_dir, exist_ok=True)
         self._original_sigint_handler = None
 
     def _setup_signal_handler(self):
@@ -118,8 +57,29 @@ class ReviewerFetcherApp:
                 print(f"[WARN] No se pudo leer el archivo {file_path}: {e}")
         return all_sites
 
+    def _save_users_json(self, municipio: str, site_id: str, site_name: str, users: List[Dict[str, str]]) -> None:
+        """
+        Guarda los usuarios encontrados en un archivo JSON dentro del subdirectorio
+        del municipio, con nombre del sitio.
+        """
+        municipio_dir = os.path.join(self.output_dir, municipio)
+        os.makedirs(municipio_dir, exist_ok=True)
+        safe_site_name = site_name.replace(" ", "_").replace("/", "_")
+        filename = f"reviewers_sitio_{site_id}_{safe_site_name}.json"
+        path_out = os.path.join(municipio_dir, filename)
+        data = {
+            "site_id": site_id,
+            "site_name": site_name,
+            "municipio": municipio,
+            "fecha_extraccion": current_timestamp(),
+            "perfiles_usuarios": users
+        }
+        with open(path_out, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        print(f"[GUARDADO] {len(users)} usuarios en {path_out}")
+
     def run(self, json_files: List[str]) -> None:
-        """Ejecuta el proceso de scraping en paralelo."""
+        """Ejecuta el proceso de scraping en paralelo y guarda por municipio/sitio."""
         self._setup_signal_handler()
 
         try:
@@ -151,25 +111,12 @@ class ReviewerFetcherApp:
                     status = result.get("status")
                     site_id = result.get("site_id")
                     site_url = result.get("site_url", "")
-                    users_found = result.get("reviews", [])  # [{user_name, user_url}, ...]
+                    users_found = result.get("users", [])
+                    municipio = result.get("municipio", "municipio_desconocido")
+                    site_name = result.get("site_name", "nombre_desconocido")
 
                     if status == "success" and users_found:
-                        # Agrega usuarios al contexto 'site_id'
-                        stats = self.data_handler.add_users(
-                            site_id, users_found
-                        )
-                        # OJO: DataHandler devuelve new_users (no new_items)
-                        self.data_handler.update_processed_user_context(
-                            site_id, site_url, {
-                                'usuarios_encontrados': stats.get('new_users', 0),
-                                'duplicados_omitidos': stats.get('duplicates_omitted', 0)
-                            }
-                        )
-                        print(
-                            f"\n[INFO] Sitio {site_id}: "
-                            f"{stats.get('new_users', 0)} usuarios nuevos."
-                        )
-                        self.data_handler.save_user_data(site_id)
+                        self._save_users_json(municipio, site_id, site_name, users_found)
                     else:
                         print(f"\n[INFO] Tarea para sitio {site_id}: {status}")
 
@@ -178,13 +125,7 @@ class ReviewerFetcherApp:
                 pool.join()
 
         finally:
-            print("\n[INFO] Guardando datos finales antes de salir.")
-            self.data_handler.save_all_data()
-            stats = self.data_handler.get_statistics()
-            users_stats = stats.get('users_stats', {})
-            total_users = users_stats.get('total_users', 0)
-            print(f"Proceso finalizado. Total de perfiles únicos: {total_users}")
-
+            print("\n[INFO] Proceso finalizado.")
 
 def main():
     """Punto de entrada principal."""
@@ -201,7 +142,6 @@ def main():
 
     app = ReviewerFetcherApp()
     app.run(json_files=args.json)
-
 
 if __name__ == "__main__":
     main()
