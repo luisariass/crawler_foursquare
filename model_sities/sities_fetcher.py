@@ -7,68 +7,15 @@ en paralelo y guarda los resultados de forma incremental en archivos JSON.
 
 import os
 import signal
-import random
 import argparse
 import pandas as pd
-from multiprocessing import Pool, Event
-from playwright.sync_api import sync_playwright
+from multiprocessing import Pool
 
 from .config.settings import Settings
-from .core.auth import FoursquareAuth
-from .core.scraper import FoursquareScraper
 from .core.data_handler import DataHandler
 from .utils.helpers import print_progress, current_timestamp
+from .utils.worker_helper import init_worker, worker_sities, shutdown_event
 
-# --- Lógica para apagado controlado (graceful shutdown) ---
-shutdown_event = Event()
-
-
-def init_worker():
-    """
-    Inicializador para cada worker. Ignora la señal de KeyboardInterrupt.
-    El proceso padre se encargará del apagado.
-    """
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-
-def worker_process(task_info: dict):
-    """
-    Proceso worker que extrae sitios de una URL de búsqueda de Foursquare.
-    """
-    if shutdown_event.is_set():
-        return {
-            "status": "shutdown",
-            "municipio": task_info['municipio'],
-            "sites": []
-        }
-
-    settings = Settings()
-    municipio = task_info['municipio']
-    url = task_info['url_municipio']
-
-    try:
-        with sync_playwright() as p:
-            browser = getattr(p, settings.BROWSER_TYPE).launch(
-                headless=settings.HEADLESS
-            )
-            context = browser.new_context(
-                user_agent=random.choice(settings.USER_AGENTS),
-                viewport=random.choice(settings.VIEWPORTS)
-            )
-            page = context.new_page()
-
-            auth = FoursquareAuth()
-            if not auth.login(page):
-                return {"status": "auth_error", "municipio": municipio, "sites": []}
-
-            scraper = FoursquareScraper()
-            status, sites = scraper.extract_sites(page, url, municipio)
-
-            browser.close()
-            return {"status": status, "municipio": municipio, "sites": sites}
-    except Exception as e:
-        print(f"[WORKER ERROR] Error fatal en {municipio}: {e}")
-        return {"status": "worker_error", "municipio": municipio, "sites": []}
 
 
 class FoursquareScraperApp:
@@ -110,7 +57,7 @@ class FoursquareScraperApp:
                 processes=self.settings.PARALLEL_PROCESSES,
                 initializer=init_worker
             ) as pool:
-                results_iterator = pool.imap_unordered(worker_process, tasks)
+                results_iterator = pool.imap_unordered(worker_sities, tasks)
 
                 for result in results_iterator:
                     if shutdown_event.is_set():
