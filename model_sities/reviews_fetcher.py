@@ -1,34 +1,48 @@
 """
-Orquestador principal para extraer perfiles de usuario de los sitios turísticos.
-Lee sitios desde sitios_*.json, procesa en paralelo y guarda resultados incrementales
-en subdirectorios por municipio, cada archivo JSON por sitio.
+Orquestador para extraer perfiles de usuario, respetando el rate limit.
+
+Lee sitios desde archivos JSON, distribuye el trabajo en paralelo y controla
+el ritmo de las peticiones para no superar el límite por hora, utilizando
+el DataHandler para una persistencia de datos robusta.
 """
 
 import os
 import glob
 import json
+import time
 import argparse
 import signal
 from typing import List, Dict
 from multiprocessing import Pool
+
 from .config.settings import Settings
-from .utils.helpers import print_progress, current_timestamp
-from .utils.worker_helper import init_worker, worker_process, shutdown_event
+from .core.data_handler import DataHandler
+from .utils.helpers import print_progress
+from .utils.worker_helper import init_worker, worker_users, shutdown_event
+
 
 class ReviewerFetcherApp:
-    """Aplicación para coordinar la extracción y guardado por municipio/sitio."""
+    """
+    Aplicación para coordinar la extracción de perfiles de usuario con
+    control de rate limit y persistencia centralizada.
+    """
 
     def __init__(self):
+        """Inicializa el orquestador y los controles de rate limit."""
         self.settings = Settings()
-        self.output_dir = os.path.join(self.settings.REVIEWS_OUTPUT_DIR)
-        os.makedirs(self.output_dir, exist_ok=True)
+        self.data_handler = DataHandler()
         self._original_sigint_handler = None
+        # Atributos para el control de rate limit
+        self.requests_this_window = 0
+        self.window_start_time = time.time()
 
     def _setup_signal_handler(self):
+        """Configura el manejador para una interrupción controlada."""
         self._original_sigint_handler = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, self._handle_shutdown)
 
     def _handle_shutdown(self, signum, frame):
+        """Manejador de la señal de apagado (Ctrl+C)."""
         print("\n[SHUTDOWN] Señal de apagado recibida. Terminando procesos...")
         shutdown_event.set()
         if self._original_sigint_handler:
@@ -52,34 +66,49 @@ class ReviewerFetcherApp:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     sites = data.get("sitios_turisticos", [])
+                    # Extrae el nombre del municipio del contexto del archivo
+                    municipio_name = data.get("municipio", "desconocido")
+                    # Añade el municipio a cada sitio para que el worker lo reciba
+                    for site in sites:
+                        site['municipio'] = municipio_name
                     all_sites.extend(sites)
             except Exception as e:
                 print(f"[WARN] No se pudo leer el archivo {file_path}: {e}")
         return all_sites
 
-    def _save_users_json(self, municipio: str, site_id: str, site_name: str, users: List[Dict[str, str]]) -> None:
+    def _rate_limit_guard(self):
         """
-        Guarda los usuarios encontrados en un archivo JSON dentro del subdirectorio
-        del municipio, con nombre del sitio.
+        Verifica si se ha alcanzado el límite de peticiones. Si es así,
+        pausa la ejecución hasta que se reinicie la ventana de tiempo.
         """
-        municipio_dir = os.path.join(self.output_dir, municipio)
-        os.makedirs(municipio_dir, exist_ok=True)
-        safe_site_name = site_name.replace(" ", "_").replace("/", "_")
-        filename = f"reviewers_sitio_{site_id}_{safe_site_name}.json"
-        path_out = os.path.join(municipio_dir, filename)
-        data = {
-            "site_id": site_id,
-            "site_name": site_name,
-            "municipio": municipio,
-            "fecha_extraccion": current_timestamp(),
-            "perfiles_usuarios": users
-        }
-        with open(path_out, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        print(f"[GUARDADO] {len(users)} usuarios en {path_out}")
+        self.requests_this_window += 1
+        elapsed_time = time.time() - self.window_start_time
+
+        # Si la ventana de tiempo ya pasó, reinicia el contador.
+        if elapsed_time > self.settings.RATE_LIMIT_WINDOW_SECONDS:
+            print("\n[INFO] Reiniciando ventana de rate limit.")
+            self.window_start_time = time.time()
+            self.requests_this_window = 1
+            return
+
+        # Si se alcanza el límite dentro de la ventana, espera.
+        if self.requests_this_window >= self.settings.RATE_LIMIT_PER_HOUR:
+            wait_time = (
+                self.settings.RATE_LIMIT_WINDOW_SECONDS - elapsed_time
+            )
+            if wait_time > 0:
+                print(
+                    f"\n[RATE LIMIT] Límite alcanzado. "
+                    f"Esperando {int(wait_time)} segundos..."
+                )
+                time.sleep(wait_time)
+
+            # Reinicia la ventana después de la espera.
+            self.window_start_time = time.time()
+            self.requests_this_window = 1
 
     def run(self, json_files: List[str]) -> None:
-        """Ejecuta el proceso de scraping en paralelo y guarda por municipio/sitio."""
+        """Ejecuta el proceso de scraping en paralelo con control de ritmo."""
         self._setup_signal_handler()
 
         try:
@@ -90,18 +119,21 @@ class ReviewerFetcherApp:
 
             tasks = [{"site_data": site} for site in sites_to_process]
             total_tasks = len(tasks)
-            print(f"Iniciando extracción de perfiles para {total_tasks} sitios...")
+            print(f"Iniciando extracción para {total_tasks} sitios...")
 
             processed_count = 0
             with Pool(
                 processes=self.settings.PARALLEL_PROCESSES,
                 initializer=init_worker
             ) as pool:
-                results_iterator = pool.imap_unordered(worker_process, tasks)
+                results_iterator = pool.imap_unordered(worker_users, tasks)
 
                 for result in results_iterator:
                     if shutdown_event.is_set():
                         break
+
+                    # --- CONTROL DE RATE LIMIT ---
+                    self._rate_limit_guard()
 
                     processed_count += 1
                     print_progress(
@@ -109,15 +141,18 @@ class ReviewerFetcherApp:
                     )
 
                     status = result.get("status")
-                    site_id = result.get("site_id")
-                    site_url = result.get("site_url", "")
                     users_found = result.get("users", [])
-                    municipio = result.get("municipio", "municipio_desconocido")
-                    site_name = result.get("site_name", "nombre_desconocido")
 
                     if status == "success" and users_found:
-                        self._save_users_json(municipio, site_id, site_name, users_found)
+                        # Llama al nuevo método específico en DataHandler
+                        self.data_handler.save_reviewers_by_municipality(
+                            municipio=result.get("municipio", "desconocido"),
+                            site_id=result.get("site_id"),
+                            site_name=result.get("site_name", "desconocido"),
+                            users=users_found
+                        )
                     else:
+                        site_id = result.get("site_id", "ID no disponible")
                         print(f"\n[INFO] Tarea para sitio {site_id}: {status}")
 
             if shutdown_event.is_set():
@@ -125,12 +160,18 @@ class ReviewerFetcherApp:
                 pool.join()
 
         finally:
-            print("\n[INFO] Proceso finalizado.")
+            print("\n[INFO] Guardando datos finales antes de salir.")
+            self.data_handler.save_all_data()
+            stats = self.data_handler.get_statistics()
+            users_stats = stats.get('users_stats', {})
+            total_users = users_stats.get('total_users', 0)
+            print(f"Proceso finalizado. Total perfiles únicos: {total_users}")
+
 
 def main():
     """Punto de entrada principal."""
     parser = argparse.ArgumentParser(
-        description='Extractor de Perfiles de Usuario desde Foursquare'
+        description='Extractor de Perfiles de Usuario de Foursquare'
     )
     parser.add_argument(
         '--json',
@@ -142,6 +183,7 @@ def main():
 
     app = ReviewerFetcherApp()
     app.run(json_files=args.json)
+
 
 if __name__ == "__main__":
     main()
