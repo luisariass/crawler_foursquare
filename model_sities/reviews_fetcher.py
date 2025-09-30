@@ -3,7 +3,7 @@ Orquestador para extraer perfiles de usuario, respetando el rate limit.
 
 Lee sitios desde archivos JSON, distribuye el trabajo en paralelo y controla
 el ritmo de las peticiones para no superar el límite por hora, utilizando
-el DataHandler para una persistencia de datos robusta.
+el DataHandler para una persistencia de datos robusta y organizada.
 """
 
 import os
@@ -12,6 +12,7 @@ import json
 import time
 import argparse
 import signal
+import random
 from typing import List, Dict
 from multiprocessing import Pool
 
@@ -32,9 +33,9 @@ class ReviewerFetcherApp:
         self.settings = Settings()
         self.data_handler = DataHandler()
         self._original_sigint_handler = None
-        # Atributos para el control de rate limit
         self.requests_this_window = 0
         self.window_start_time = time.time()
+        self.block_cooldown_until = 0
 
     def _setup_signal_handler(self):
         """Configura el manejador para una interrupción controlada."""
@@ -66,9 +67,7 @@ class ReviewerFetcherApp:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     sites = data.get("sitios_turisticos", [])
-                    # Extrae el nombre del municipio del contexto del archivo
                     municipio_name = data.get("municipio", "desconocido")
-                    # Añade el municipio a cada sitio para que el worker lo reciba
                     for site in sites:
                         site['municipio'] = municipio_name
                     all_sites.extend(sites)
@@ -81,17 +80,24 @@ class ReviewerFetcherApp:
         Verifica si se ha alcanzado el límite de peticiones. Si es así,
         pausa la ejecución hasta que se reinicie la ventana de tiempo.
         """
+        if time.time() < self.block_cooldown_until:
+            wait_time = self.block_cooldown_until - time.time()
+            print(
+                f"\n[COOLDOWN] Pausa por bloqueo previo. "
+                f"Reanudando en {int(wait_time)} segundos..."
+            )
+            time.sleep(wait_time)
+            self.block_cooldown_until = 0
+
         self.requests_this_window += 1
         elapsed_time = time.time() - self.window_start_time
 
-        # Si la ventana de tiempo ya pasó, reinicia el contador.
         if elapsed_time > self.settings.RATE_LIMIT_WINDOW_SECONDS:
             print("\n[INFO] Reiniciando ventana de rate limit.")
             self.window_start_time = time.time()
             self.requests_this_window = 1
             return
 
-        # Si se alcanza el límite dentro de la ventana, espera.
         if self.requests_this_window >= self.settings.RATE_LIMIT_PER_HOUR:
             wait_time = (
                 self.settings.RATE_LIMIT_WINDOW_SECONDS - elapsed_time
@@ -103,9 +109,41 @@ class ReviewerFetcherApp:
                 )
                 time.sleep(wait_time)
 
-            # Reinicia la ventana después de la espera.
             self.window_start_time = time.time()
             self.requests_this_window = 1
+
+    def _handle_result(self, result: Dict):
+        """Procesa el resultado de un worker."""
+        status = result.get("status")
+        site_id = result.get("site_id", "ID no disponible")
+
+        if status == "blocked":
+            print(f"\n[BLOCK DETECTED] Tarea para sitio {site_id} fue bloqueada.")
+            cooldown_period = random.uniform(120, 300)
+            self.block_cooldown_until = time.time() + cooldown_period
+            print(f"Iniciando cooldown de {int(cooldown_period)} segundos.")
+            return
+
+        if status == "success":
+            users_found = result.get("users", [])
+            if users_found:
+                context_info = {
+                    "municipality": result.get("municipio", "desconocido"),
+                    "site_id": site_id,
+                    "site_name": result.get("site_name", "desconocido"),
+                }
+                stats = self.data_handler.add_reviewers(
+                    context_info, users_found
+                )
+                print(
+                    f"\n[INFO] Sitio {context_info['site_id']}: "
+                    f"{stats['new_reviewers']} perfiles nuevos."
+                )
+                self.data_handler.save_reviewers_data(context_info)
+            else:
+                print(f"\n[INFO] Tarea para sitio {site_id}: éxito sin perfiles.")
+        else:
+            print(f"\n[INFO] Tarea para sitio {site_id}: {status}")
 
     def run(self, json_files: List[str]) -> None:
         """Ejecuta el proceso de scraping en paralelo con control de ritmo."""
@@ -132,40 +170,20 @@ class ReviewerFetcherApp:
                     if shutdown_event.is_set():
                         break
 
-                    # --- CONTROL DE RATE LIMIT ---
                     self._rate_limit_guard()
-
                     processed_count += 1
                     print_progress(
                         processed_count, total_tasks, "Extrayendo perfiles"
                     )
-
-                    status = result.get("status")
-                    users_found = result.get("users", [])
-
-                    if status == "success" and users_found:
-                        # Llama al nuevo método específico en DataHandler
-                        self.data_handler.save_reviewers_by_municipality(
-                            municipio=result.get("municipio", "desconocido"),
-                            site_id=result.get("site_id"),
-                            site_name=result.get("site_name", "desconocido"),
-                            users=users_found
-                        )
-                    else:
-                        site_id = result.get("site_id", "ID no disponible")
-                        print(f"\n[INFO] Tarea para sitio {site_id}: {status}")
+                    self._handle_result(result)
 
             if shutdown_event.is_set():
                 pool.terminate()
                 pool.join()
 
         finally:
-            print("\n[INFO] Guardando datos finales antes de salir.")
+            print("\n[INFO] Proceso de extracción finalizado.")
             self.data_handler.save_all_data()
-            stats = self.data_handler.get_statistics()
-            users_stats = stats.get('users_stats', {})
-            total_users = users_stats.get('total_users', 0)
-            print(f"Proceso finalizado. Total perfiles únicos: {total_users}")
 
 
 def main():
