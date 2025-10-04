@@ -66,10 +66,10 @@ class ReviewerFetcherApp:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    sites = data.get("sitios_turisticos", [])
-                    municipio_name = data.get("municipio", "desconocido")
+                    sites = data.get("sitios_turisticos", []) #LEER LISTA DENTRO DEL JSON PARA SITIES
+                    municipio_name = data.get("municipio", "desconocido") #DEFINIR QUE ATRIBUTO SE BUSCARA EN LA LISTA
                     for site in sites:
-                        site['municipio'] = municipio_name
+                        site['municipio'] = municipio_name #COMPARAR SI EL ATRIBUTO COINCIDE CON ALGUNO EN LA LISTA
                     all_sites.extend(sites)
             except Exception as e:
                 print(f"[WARN] No se pudo leer el archivo {file_path}: {e}")
@@ -127,8 +127,8 @@ class ReviewerFetcherApp:
         if status == "success":
             users_found = result.get("users", [])
             if users_found:
-                context_info = {
-                    "municipality": result.get("municipio", "desconocido"),
+                context_info = { #DICCCIONARIO QUE GUARDA EL CONTEXTO DENTRO DEL JSON 
+                    "municipio": result.get("municipio", "desconocido"), #cambio de municipality a municipio
                     "site_id": site_id,
                     "site_name": result.get("site_name", "desconocido"),
                 }
