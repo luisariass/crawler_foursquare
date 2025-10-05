@@ -17,8 +17,7 @@ from .utils.helpers import print_progress, current_timestamp
 from .utils.worker_helper import init_worker, worker_sities, shutdown_event
 
 
-
-class FoursquareScraperApp:
+class SitiesFetcher:
     """Aplicación principal para coordinar el scraping de sitios."""
 
     def __init__(self):
@@ -43,15 +42,24 @@ class FoursquareScraperApp:
         self._setup_signal_handler()
 
         try:
+            # Cargar datos existentes al inicio
+            self.data_handler.load_all_data()
+            initial_stats = self.data_handler.get_statistics()
+            initial_sites = initial_stats.get('sites_stats', {}).get('total_sites', 0)
+            print(f"[INFO] Se cargaron {initial_sites} sitios existentes.")
+
             df_urls = pd.read_csv(csv_path).iloc[start_index:end_index]
             tasks = [
-                {'municipio': row['municipio'], 'url_municipio': row['url_municipio']}
+                {
+                    'municipio': row['municipio'],
+                    'url_municipio': row['url_municipio']
+                }
                 for _, row in df_urls.iterrows()
             ]
             total_tasks = len(tasks)
             processed_count = 0
 
-            print(f"Iniciando scraping para {total_tasks} municipios.")
+            print(f"Iniciando scraping para {total_tasks} zonas.")
 
             with Pool(
                 processes=self.settings.PARALLEL_PROCESSES,
@@ -73,8 +81,6 @@ class FoursquareScraperApp:
                     sites_found = result.get("sites", [])
 
                     if status == "success" and sites_found:
-                        # --- MODIFICACIÓN CLAVE ---
-                        # Capturamos y usamos las estadísticas devueltas
                         stats = self.data_handler.add_sites(
                             municipio, sites_found
                         )
@@ -82,14 +88,10 @@ class FoursquareScraperApp:
                             f"\n[INFO] Municipio {municipio}: "
                             f"{stats['new_sites']} sitios nuevos, "
                             f"{stats['duplicates_omitted']} duplicados omitidos. "
-                            f"Total actual: {stats['total_sites']}."
+                            f"Total actual: {stats['total_items']}."
                         )
-                        self.data_handler.update_processed_url(
-                            municipio,
-                            result.get('url', ''),
-                            stats
-                        )
-                        self.data_handler.save_municipio_data(municipio)
+                        # Guardado incremental de sitios
+                        self.data_handler.save_sites_data(municipio)
 
                     elif status == "no_results":
                         print(f"\n[INFO] Municipio {municipio}: Sin resultados.")
@@ -103,9 +105,9 @@ class FoursquareScraperApp:
                     else:
                         print(f"\n[WARN] Tarea fallida para {municipio}: {status}")
 
-            if shutdown_event.is_set():
-                pool.terminate()
-                pool.join()
+                if shutdown_event.is_set():
+                    pool.terminate()
+                    pool.join()
 
         finally:
             print("\n[INFO] Guardando datos finales antes de salir.")
@@ -123,16 +125,18 @@ def main():
     )
     parser.add_argument(
         '--csv', required=True, help='Ruta al archivo CSV con las URLs'
+        "python -m model_sities.sities_fetcher --csv data/municipios_urls.csv"
     )
     parser.add_argument(
         '--start', type=int, default=0, help='Índice de inicio (fila)'
+        "python -m model_sities.sities_fetcher --start 100"
     )
     parser.add_argument(
         '--end', type=int, default=None, help='Índice de fin (fila)'
     )
     args = parser.parse_args()
 
-    app = FoursquareScraperApp()
+    app = SitiesFetcher()
     app.run(csv_path=args.csv, start_index=args.start, end_index=args.end)
 
 
