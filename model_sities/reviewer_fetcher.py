@@ -22,7 +22,7 @@ from .utils.helpers import print_progress
 from .utils.worker_helper import init_worker, worker_users, shutdown_event
 
 
-class ReviewerFetcherApp:
+class ReviewerFetcher:
     """
     Aplicación para coordinar la extracción de perfiles de usuario con
     control de rate limit y persistencia centralizada.
@@ -199,7 +199,7 @@ def main():
     )
     args = parser.parse_args()
 
-    app = ReviewerFetcherApp()
+    app = ReviewerFetcher()
     app.run(json_files=args.json)
 
 
