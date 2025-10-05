@@ -22,7 +22,7 @@ from ..config.settings import Settings
 from ..utils.human_behavior import HumanBehavior
 
 
-class FoursquareReviewerScraper:
+class ReviewerLogic:
     """
     Extrae SOLO perfiles de reseñante (user_name, user_url) de un sitio Foursquare.
     """
