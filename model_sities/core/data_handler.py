@@ -91,41 +91,79 @@ class GenericDataHandler:
     def __init__(self, strategy: DataStorageStrategy, output_dir: str):
         self.strategy = strategy
         self.output_dir = output_dir
-        self.data_by_context: Dict[str, List[T]] = {}
+        self.data_by_context: Dict[str, Dict[str, Any]] = {}
         os.makedirs(self.output_dir, exist_ok=True)
+
+    def load_all_data(self):
+        """
+        Carga todos los datos existentes desde el directorio de salida a la memoria.
+        Recorre recursivamente el directorio buscando archivos .json.
+        """
+        print(f"[INFO] Buscando datos existentes en: {self.output_dir}")
+        loaded_count = 0
+        for root, _, files in os.walk(self.output_dir):
+            for filename in files:
+                if filename.endswith('.json'):
+                    file_path = os.path.join(root, filename)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+
+                        context = data.get('context')
+                        items = data.get(self.strategy.get_data_key(), [])
+
+                        if context and items:
+                            context_key = str(context)
+                            self.data_by_context[context_key] = {
+                                "context_obj": context,
+                                "items": items
+                            }
+                            loaded_count += len(items)
+                    except (json.JSONDecodeError, KeyError) as e:
+                        print(f"[WARN] Omitiendo archivo mal formado {file_path}: {e}")
+        print(f"[INFO] Se cargaron {loaded_count} items preexistentes para la estrategia.")
 
     def add_items(self, context: Any, items: List[T]) -> Dict[str, int]:
         """Añade items a un contexto, evitando duplicados."""
         context_key = str(context)
         if context_key not in self.data_by_context:
-            self.data_by_context[context_key] = []
+            self.data_by_context[context_key] = {
+                "context_obj": context,
+                "items": []
+            }
 
         existing_ids = {self.strategy.get_unique_identifier(item)
-                        for item in self.data_by_context[context_key]}
+                        for item in self.data_by_context[context_key]["items"]}
         new_items = []
         for item in items:
             identifier = self.strategy.get_unique_identifier(item)
             if identifier and identifier not in existing_ids:
                 new_items.append(item)
                 existing_ids.add(identifier)
-        self.data_by_context[context_key].extend(new_items)
+
+        self.data_by_context[context_key]["items"].extend(new_items)
         return {
             'new_items': len(new_items),
             'duplicates_omitted': len(items) - len(new_items),
-            'total_items': len(self.data_by_context[context_key])
+            'total_items': len(self.data_by_context[context_key]["items"])
         }
 
-    def save_context_data(self, context: Any) -> bool:
-        """Guarda datos usando la estrategia para construir la ruta."""
-        context_key = str(context)
-        items_in_memory = self.data_by_context.get(context_key, [])
-        if not items_in_memory:
+    def save_context_data(self, context_key: str) -> bool:
+        """Guarda datos usando la clave de contexto para encontrar el objeto original."""
+        context_data = self.data_by_context.get(context_key)
+
+        if not context_data or not context_data.get("items"):
             return False
 
-        file_path = self.strategy.build_filepath(self.output_dir, context)
+        context_obj = context_data["context_obj"]
+        items_in_memory = context_data["items"]
+        file_path = self.strategy.build_filepath(self.output_dir, context_obj)
+
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
         data_to_save = {
-            "municipality": context if isinstance(context, str) else context.get("municipio"),
-            "context": context,
+            "municipality": context_obj if isinstance(context_obj, str) else context_obj.get("municipio"),
+            "context": context_obj,
             self.strategy.get_data_key(): items_in_memory,
             "total": len(items_in_memory),
             "fecha_extraccion": current_timestamp(),
@@ -133,11 +171,9 @@ class GenericDataHandler:
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data_to_save, f, ensure_ascii=False, indent=4)
-            # Limpia la memoria para este contexto después de guardar
-            del self.data_by_context[context_key]
             return True
         except IOError as e:
-            print(f"[ERROR] No se pudo guardar datos para {context}: {e}")
+            print(f"[ERROR] No se pudo guardar datos para {context_obj}: {e}")
             return False
 
 
@@ -159,51 +195,60 @@ class DataHandler:
             output_dir=settings.REVIEWS_OUTPUT_DIR
         )
 
+    def load_all_data(self):
+        """Carga todos los datos para todas las estrategias."""
+        print("[INFO] Iniciando carga de todos los datos existentes...")
+        self.sites.load_all_data()
+        self.reviewers.load_all_data()
+        print("[INFO] Carga de datos finalizada.")
+
     def add_sites(self, municipio: str, sites: List[Dict]) -> Dict[str, int]:
         stats = self.sites.add_items(municipio, sites)
         return {'new_sites': stats['new_items'], **stats}
 
     def save_sites_data(self, municipio: str) -> bool:
-        return self.sites.save_context_data(municipio)
+        return self.sites.save_context_data(str(municipio))
 
     def add_reviewers(self, context: Dict, reviewers: List[Dict]) -> Dict[str, int]:
         stats = self.reviewers.add_items(context, reviewers)
         return {'new_reviewers': stats['new_items'], **stats}
 
     def save_reviewers_data(self, context: Dict) -> bool:
-        return self.reviewers.save_context_data(context)
+        return self.reviewers.save_context_data(str(context))
 
     def save_all_data(self) -> None:
-        print("[INFO] Guardando todos los datos de sitios...")
-        for context in self.sites.data_by_context.keys():
-            self.sites.save_context_data(context)
+        print("[INFO] Guardando todos los datos de sitios pendientes...")
+        contexts_to_save = list(self.sites.data_by_context.keys())
+        for context_key in contexts_to_save:
+            self.sites.save_context_data(context_key)
 
-        print("[INFO] Guardando todos los datos de usuarios...")
-        for context in self.reviewers.data_by_context.keys():
-            self.reviewers.save_context_data(context)
+        print("[INFO] Guardando todos los datos de usuarios pendientes...")
+        contexts_to_save = list(self.reviewers.data_by_context.keys())
+        for context_key in contexts_to_save:
+            self.reviewers.save_context_data(context_key)
 
     def get_statistics(self) -> Dict[str, Any]:
         sites_data = self.sites.data_by_context
-        total_sitios = sum(len(sitios) for sitios in sites_data.values())
+        total_sitios = sum(len(v['items']) for v in sites_data.values())
 
         reviewers_data = self.reviewers.data_by_context
-        total_usuarios = sum(len(usuarios) for usuarios in reviewers_data.values())
+        total_usuarios = sum(len(v['items']) for v in reviewers_data.values())
 
         return {
             'sites_stats': {
                 'total_municipalities': len(sites_data),
                 'total_sites': total_sitios,
-                'municipalities': list(sites_data.keys()),
+                'municipalities': [v['context_obj'] for v in sites_data.values()],
                 'sites_per_municipality': {
-                    municipio: len(sitios) for municipio, sitios in sites_data.items()
+                    k: len(v['items']) for k, v in sites_data.items()
                 }
             },
             'users_stats': {
                 'total_contexts': len(reviewers_data),
                 'total_users': total_usuarios,
-                'contexts': list(reviewers_data.keys()),
+                'contexts': [v['context_obj'] for v in reviewers_data.values()],
                 'users_per_context': {
-                    context: len(usuarios) for context, usuarios in reviewers_data.items()
+                    k: len(v['items']) for k, v in reviewers_data.items()
                 }
             }
         }
