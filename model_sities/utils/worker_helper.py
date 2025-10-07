@@ -5,8 +5,8 @@ from typing import Dict, Any, List, Tuple
 from multiprocessing import Event
 from playwright.sync_api import sync_playwright
 from ..core.auth import FoursquareAuth
-from ..core.reviews import FoursquareReviewerScraper
-from ..core.scraper import FoursquareScraper
+from ..core.reviewer import ReviewerLogic
+from ..core.sities import SitiesLogic
 from ..config.settings import Settings
 
 # --- Lógica para apagado controlado ---
@@ -73,7 +73,7 @@ class BaseScraperWorker(ABC):
             print(f"[WORKER ERROR] Error en {self.__class__.__name__}: {e}")
             return {**self.get_default_result(task_info), "status": "worker_error"}
 
-class UserScraperWorker(BaseScraperWorker):
+class ReviewerScraperWorker(BaseScraperWorker):
     """Worker para extraer perfiles de usuario."""
     
     def scrape(self, page, task_info: Dict[str, Any]) -> Tuple[str, List]:
@@ -81,9 +81,9 @@ class UserScraperWorker(BaseScraperWorker):
         site_url = site_data.get('url_sitio', '')
         site_id = site_data.get('id', 'unknown_id')
         
-        scraper = FoursquareReviewerScraper()
-        return scraper.extract_reviews(page, site_url, str(site_id))
-    
+        reviewer = ReviewerLogic()
+        return reviewer.extract_reviews(page, site_url, str(site_id))
+
     def get_default_result(self, task_info: Dict[str, Any]) -> Dict[str, Any]:
         site_data = task_info['site_data']
         return {
@@ -101,8 +101,8 @@ class SiteScraperWorker(BaseScraperWorker):
         url = task_info['url_municipio']
         municipio = task_info['municipio']
         
-        scraper = FoursquareScraper()
-        return scraper.extract_sites(page, url, municipio)
+        sities = SitiesLogic()
+        return sities.extract_sites(page, url, municipio)
     
     def get_default_result(self, task_info: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -112,7 +112,7 @@ class SiteScraperWorker(BaseScraperWorker):
 
 # Funciones originales (ahora son wrappers simples)
 def worker_users(task_info: Dict[str, Any]) -> Dict[str, Any]:
-    worker = UserScraperWorker()
+    worker = ReviewerScraperWorker()
     result = worker.execute(task_info)
     # Mantener compatibilidad con la interfaz original
     if "data" in result:
