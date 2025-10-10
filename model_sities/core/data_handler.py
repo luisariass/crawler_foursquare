@@ -49,7 +49,10 @@ class SitesStorageStrategy(DataStorageStrategy):
 
     def build_filepath(self, output_dir: str, context: str) -> str:
         # El contexto es el nombre del municipio.
-        return os.path.join(output_dir, f'sitios_{context}.json')
+        safe_municipio_name = "".join(
+            c for c in context if c.isalnum() or c in (' ', '_')
+        ).rstrip().replace(' ', '_')
+        return os.path.join(output_dir, f'sitios_{safe_municipio_name}.json')
 
 
 class ReviewersStorageStrategy(DataStorageStrategy):
@@ -195,10 +198,15 @@ class DataHandler:
             output_dir=settings.REVIEWS_OUTPUT_DIR
         )
 
-    def load_all_data(self):
+    def load_data_sities(self):
         """Carga todos los datos para todas las estrategias."""
         print("[INFO] Iniciando carga de todos los datos existentes...")
         self.sites.load_all_data()
+        print("[INFO] Carga de datos finalizada.")
+    
+    def load_data_reviewers(self):
+        """Carga todos los datos para todas las estrategias."""
+        print("[INFO] Iniciando carga de todos los datos existentes...")
         self.reviewers.load_all_data()
         print("[INFO] Carga de datos finalizada.")
 
