@@ -25,8 +25,8 @@ class Settings:
     COOKIES_JSON = os.path.join(DATA_DIR, "cookies_foursquare.json")
     SITIES_OUTPUT_DIR = os.path.join(DATA_DIR, "sities")
     REVIEWS_OUTPUT_DIR = os.path.join(DATA_DIR, "reviewers_sities")
-    PROGRESO_PATH = os.path.join(REVIEWS_OUTPUT_DIR, "progress_reviews.json")
-    FAILED_MUNICIPALITIES_PATH = os.path.join(DATA_DIR, "failed_municipalities.txt") # Archivo para registrar municipios fallidos
+    PROGRESS_SITIES = os.path.join(SITIES_OUTPUT_DIR, "progress_sities.json")
+    PROGRESS_REVIEWER = os.path.join(REVIEWS_OUTPUT_DIR, "progress_reviewer.json")
     STOP_FILE_PATH = os.path.join(DATA_DIR, "stop_scraping.flag") # Archivo para controlar la pausa
 
     USER_AGENTS = [
@@ -46,7 +46,8 @@ class Settings:
     # URLs de Foursquare
     BASE_URL = "https://es.foursquare.com"
     LOGIN_URL = f"{BASE_URL}/login"
-    
+    HUMAN_DELAY_MIN = 0.8  # segundos
+    HUMAN_DELAY_MAX = 2.5  # segundos
     # Configuración del navegador
     BROWSER_TYPE = "chromium"  # firefox, chromium, webkit 
     HEADLESS = True # False = firefox con interfaz gráfica, True = sin interfaz gráfica
@@ -78,9 +79,12 @@ class Settings:
     SAVE_INTERVAL = 5  # Guardar cada 5 URLs procesadas
     RETRIES = 3  # Número de reintentos al fallar una URL
     TIMEOUT = 60000
-    PARALLEL_PROCESSES = 1 # Número de procesos a ejecutar en paralelo
+    PARALLEL_PROCESSES = os.cpu_count()  # Número de procesos a ejecutar en paralelo
     BACKOFF_FACTOR = 10 # Factor para el backoff progresivo en reintentos
 
+    RATE_LIMIT_PER_HOUR = 45  # Límite prudente (oficial es 500)
+    RATE_LIMIT_WINDOW_SECONDS = 3600 
+    
     # Selectores CSS
     SELECTORS = {
         'content_holder': '.contentHolder',
@@ -94,7 +98,9 @@ class Settings:
         'login_button': 'input[id="loginFormButton"]',
         'no_results_card': 'li.card.noResults',
         'generic_error_card': 'li.card.genericError',
+        'block_error_h1': 'div#container > h1',
         'map_search_button': 'div.leaflet-control-requery.leaflet-control.active' # <-- ¡NUEVO! Selector para "Buscar en esta área"
+        
     }
     
     @classmethod
