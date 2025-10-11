@@ -25,38 +25,66 @@ class Settings:
     COOKIES_JSON = os.path.join(DATA_DIR, "cookies_foursquare.json")
     SITIES_OUTPUT_DIR = os.path.join(DATA_DIR, "sities")
     REVIEWS_OUTPUT_DIR = os.path.join(DATA_DIR, "reviewers_sities")
-    PROGRESO_PATH = os.path.join(REVIEWS_OUTPUT_DIR, "progress_reviews.json")
-    FAILED_MUNICIPALITIES_PATH = os.path.join(DATA_DIR, "failed_municipalities.txt")
+    PROGRESS_SITIES = os.path.join(SITIES_OUTPUT_DIR, "progress_sities.json")
+    PROGRESS_REVIEWER = os.path.join(REVIEWS_OUTPUT_DIR, "progress_reviewer.json")
+    STOP_FILE_PATH = os.path.join(DATA_DIR, "stop_scraping.flag") # Archivo para controlar la pausa
 
+    USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/113.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+    ]
+    VIEWPORTS = [
+        {'width': 1920, 'height': 1080},
+        {'width': 1366, 'height': 768},
+        {'width': 1536, 'height': 864}
+    ]
+    
     # URLs de Foursquare
     BASE_URL = "https://es.foursquare.com"
     LOGIN_URL = f"{BASE_URL}/login"
-    
+    HUMAN_DELAY_MIN = 0.8  # segundos
+    HUMAN_DELAY_MAX = 2.5  # segundos
     # Configuración del navegador
     BROWSER_TYPE = "chromium"  # firefox, chromium, webkit 
     HEADLESS = True # False = firefox con interfaz gráfica, True = sin interfaz gráfica
     
-    # Tiempos de espera (en milisegundos)
-    WAIT_SHORT_MIN = 1000
-    WAIT_SHORT_MAX = 3000
+    # Tiempos de espera (en milisegundos) basados en tu script de reviews
+    # Pausa corta para acciones como paginación o clics secundarios
+    WAIT_SHORT_MIN = 3000
+    WAIT_SHORT_MAX = 5000
+    
+    # Pausa media después de cargar una página principal
     WAIT_MEDIUM_MIN = 5000
-    WAIT_MEDIUM_MAX = 7000
+    WAIT_MEDIUM_MAX = 6000
+    
+    # Pausa larga para usar entre lotes de tareas o en backoff
     WAIT_LONG_MIN = 15000
     WAIT_LONG_MAX = 25000
-    WAIT_EXTRA_LONG_MIN = 30000
+    
+    BLOCK_COOLDOWN_MIN_SECONDS = 30 * 60  # 30 minutos
+    BLOCK_COOLDOWN_MAX_SECONDS = 40 * 60  # 40 minutos
+
+    # Pausa de "enfriamiento" extra larga para evitar bloqueos
+    WAIT_EXTRA_LONG_MIN = 30000 # USADO EN REVIEWS.PY PARA BUSCAR LAS RESEÑAS DE LOS RESEÑANTES
     WAIT_EXTRA_LONG_MAX = 40000
     
-    # Pausa aleatoria post-carga para mitigar bloqueos
-    POST_LOAD_WAIT_MIN = 2500
-    POST_LOAD_WAIT_MAX = 5000
-    
+    # Pausa aleatoria post-carga (usaremos la pausa media)
+    POST_LOAD_WAIT_MIN = 5000
+    POST_LOAD_WAIT_MAX = 6000
     # Configuración de procesamiento
     SAVE_INTERVAL = 5  # Guardar cada 5 URLs procesadas
     RETRIES = 3  # Número de reintentos al fallar una URL
     TIMEOUT = 60000
-    PARALLEL_PROCESSES = 4 # Número de procesos a ejecutar en paralelo
+    PARALLEL_PROCESSES = os.cpu_count()  # Número de procesos a ejecutar en paralelo
     BACKOFF_FACTOR = 10 # Factor para el backoff progresivo en reintentos
 
+    RATE_LIMIT_PER_HOUR = 45  # Límite prudente (oficial es 500)
+    RATE_LIMIT_WINDOW_SECONDS = 3600 
+    
     # Selectores CSS
     SELECTORS = {
         'content_holder': '.contentHolder',
@@ -68,7 +96,11 @@ class Settings:
         'login_username': 'input[id="username"]',
         'login_password': 'input[id="password"]',
         'login_button': 'input[id="loginFormButton"]',
-        'no_results_card': 'li.card.noResults'
+        'no_results_card': 'li.card.noResults',
+        'generic_error_card': 'li.card.genericError',
+        'block_error_h1': 'div#container > h1',
+        'map_search_button': 'div.leaflet-control-requery.leaflet-control.active' # <-- ¡NUEVO! Selector para "Buscar en esta área"
+        
     }
     
     @classmethod

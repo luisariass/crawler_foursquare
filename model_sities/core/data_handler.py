@@ -1,119 +1,262 @@
 """
-Gestión y almacenamiento de datos extraídos
+Gestión y almacenamiento de datos extraídos usando un patrón de diseño Strategy
+para manejar diferentes tipos de datos (sitios, usuarios, etc.) de forma genérica.
 """
+
 import os
 import json
-from typing import Dict, List, Any
+from abc import ABC, abstractmethod
+from typing import Dict, List, Any, TypeVar
+
 from ..config.settings import Settings
 from ..utils.helpers import current_timestamp
 
-class DataHandler:
-    """Maneja el almacenamiento y gestión de los datos extraídos"""
-    
-    def __init__(self, output_dir: str = None):
-        """Inicializa el gestor de datos"""
-        self.output_dir = output_dir or Settings.SITIES_OUTPUT_DIR
-        self.all_sitios: Dict[str, List[Dict]] = {}
-        self.processed_urls: Dict[str, Dict] = {}
-        self._ensure_output_dir()
-    
-    def _ensure_output_dir(self) -> None:
-        """Asegura que exista el directorio de salida"""
+T = TypeVar('T', bound=Dict[str, Any])
+
+
+class DataStorageStrategy(ABC):
+    """
+    Interfaz abstracta para definir la estrategia de almacenamiento.
+    Define cómo manejar los detalles específicos de un tipo de dato.
+    """
+
+    @abstractmethod
+    def get_unique_identifier(self, item: T) -> str:
+        """Devuelve el identificador único para un item (ej: 'url_sitio')."""
+        pass
+
+    @abstractmethod
+    def get_data_key(self) -> str:
+        """Devuelve la clave principal de los datos en el JSON."""
+        pass
+
+    @abstractmethod
+    def build_filepath(self, output_dir: str, context: Any) -> str:
+        """
+        Construye la ruta completa del archivo de salida basado en el contexto.
+        """
+        pass
+
+
+class SitesStorageStrategy(DataStorageStrategy):
+    """Estrategia para guardar sitios por municipio: sitios_<municipio>.json."""
+
+    def get_unique_identifier(self, item: T) -> str:
+        return item.get('url_sitio', '')
+
+    def get_data_key(self) -> str:
+        return 'sitios_turisticos'
+
+    def build_filepath(self, output_dir: str, context: str) -> str:
+        # El contexto es el nombre del municipio.
+        safe_municipio_name = "".join(
+            c for c in context if c.isalnum() or c in (' ', '_')
+        ).rstrip().replace(' ', '_')
+        return os.path.join(output_dir, f'sitios_{safe_municipio_name}.json')
+
+
+class ReviewersStorageStrategy(DataStorageStrategy):
+    """
+    Estrategia para guardar reseñantes por municipio/sitio:
+    <municipio>/reviewers_sitio_<id>_<nombre>.json
+    """
+
+    def get_unique_identifier(self, item: T) -> str:
+        return item.get('user_url', '')
+
+    def get_data_key(self) -> str:
+        return 'user_profile'
+
+    def build_filepath(self, output_dir: str, context: Dict[str, str]) -> str:
+        """
+        Construye la ruta anidada. El contexto debe ser un diccionario.
+        """
+        municipality = context.get("municipio", "desconocido")
+        site_id = context.get("site_id", "unknown_id")
+        site_name = context.get("site_name", "unknown_name")
+
+        municipio_dir = os.path.join(output_dir, municipality)
+        os.makedirs(municipio_dir, exist_ok=True)
+
+        safe_site_name = "".join(
+            c for c in site_name if c.isalnum() or c in (' ', '_')
+        ).rstrip().replace(' ', '_')
+        filename = f"reviewers_sitio_{site_id}_{safe_site_name}.json"
+        return os.path.join(municipio_dir, filename)
+
+
+class GenericDataHandler:
+    """
+    Clase genérica que maneja la lógica común de almacenamiento de datos.
+    Utiliza una estrategia para los detalles específicos.
+    """
+
+    def __init__(self, strategy: DataStorageStrategy, output_dir: str):
+        self.strategy = strategy
+        self.output_dir = output_dir
+        self.data_by_context: Dict[str, Dict[str, Any]] = {}
         os.makedirs(self.output_dir, exist_ok=True)
-    
-    def add_sites(self, municipio: str, sites: List[Dict], processing_index: int) -> Dict[str, int]:
+
+    def load_all_data(self):
         """
-        Añade sitios a un municipio, evitando duplicados.
+        Carga todos los datos existentes desde el directorio de salida a la memoria.
+        Recorre recursivamente el directorio buscando archivos .json.
         """
-        if municipio not in self.all_sitios:
-            self.all_sitios[municipio] = []
-        
-        existing_urls = {sitio.get('url_sitio', '') for sitio in self.all_sitios[municipio]}
-        new_sites = []
-        
-        for site in sites:
-            site_url = site.get('url_sitio', '')
-            if site_url and site_url not in existing_urls:
-                site['municipio'] = municipio
-                site['indice_procesamiento'] = processing_index
-                new_sites.append(site)
-                existing_urls.add(site_url)
-        
-        self.all_sitios[municipio].extend(new_sites)
-        
-        for i, site in enumerate(self.all_sitios[municipio]):
-            site['id'] = i + 1
-        
-        return {
-            'new_sites': len(new_sites),
-            'duplicates_omitted': len(sites) - len(new_sites),
-            'total_sites': len(self.all_sitios[municipio])
-        }
-    
-    def update_processed_url(self, municipio: str, url: str, stats: Dict[str, Any]) -> None:
-        """Actualiza la información de una URL procesada"""
-        self.processed_urls[municipio] = {
-            'url': url,
-            'fecha_procesamiento': current_timestamp(),
-            **stats
-        }
-    
-    def save_municipio_data(self, municipio: str) -> bool:
-        """Guarda los datos de un municipio específico"""
-        if municipio not in self.all_sitios or not self.all_sitios[municipio]:
-            return False
-        
-        datos = {
-            "municipio": municipio,
-            "sitios_turisticos": self.all_sitios[municipio],
-            "total": len(self.all_sitios[municipio]),
-            "fecha_extraccion": current_timestamp(),
-            "url_procesada": self.processed_urls.get(municipio, {})
-        }
-        
-        archivo_municipio = os.path.join(self.output_dir, f'sitios_{municipio}.json')
-        
-        try:
-            with open(archivo_municipio, 'w', encoding='utf-8') as file:
-                json.dump(datos, file, ensure_ascii=False, indent=4)
-            # Solo mostrar mensaje si hay error, no en cada guardado
-            return True
-        except Exception as e:
-            print(f"[ERROR] No se pudo guardar datos de {municipio}: {e}")
-            return False
-    
-    def save_all_data(self) -> bool:
-        """Guarda los datos de todos los municipios procesados"""
-        try:
-            for municipio in self.all_sitios.keys():
-                self.save_municipio_data(municipio)
-            
-            total_sitios = sum(len(sitios) for sitios in self.all_sitios.values())
-            resumen = {
-                "resumen_general": {
-                    "total_municipios_procesados": len(self.all_sitios),
-                    "total_sitios_extraidos": total_sitios,
-                    "fecha_procesamiento": current_timestamp()
-                },
-                "municipios": {municipio: len(sitios) for municipio, sitios in self.all_sitios.items()},
-                "urls_procesadas": self.processed_urls
+        print(f"[INFO] Buscando datos existentes en: {self.output_dir}")
+        loaded_count = 0
+        for root, _, files in os.walk(self.output_dir):
+            for filename in files:
+                if filename.endswith('.json'):
+                    file_path = os.path.join(root, filename)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+
+                        context = data.get('context')
+                        items = data.get(self.strategy.get_data_key(), [])
+
+                        if context and items:
+                            context_key = str(context)
+                            self.data_by_context[context_key] = {
+                                "context_obj": context,
+                                "items": items
+                            }
+                            loaded_count += len(items)
+                    except (json.JSONDecodeError, KeyError) as e:
+                        print(f"[WARN] Omitiendo archivo mal formado {file_path}: {e}")
+        print(f"[INFO] Se cargaron {loaded_count} items preexistentes para la estrategia.")
+
+    def add_items(self, context: Any, items: List[T]) -> Dict[str, int]:
+        """Añade items a un contexto, evitando duplicados."""
+        context_key = str(context)
+        if context_key not in self.data_by_context:
+            self.data_by_context[context_key] = {
+                "context_obj": context,
+                "items": []
             }
-            
-            archivo_resumen = os.path.join(self.output_dir, 'resumen_extraccion.json')
-            with open(archivo_resumen, 'w', encoding='utf-8') as file:
-                json.dump(resumen, file, ensure_ascii=False, indent=4)
-            print(f"[INFO] Resumen general guardado en {archivo_resumen}")
-            return True
-        except Exception as e:
-            print(f"[ERROR] No se pudo guardar el resumen general: {e}")
-            return False
-    
-    def get_statistics(self) -> Dict[str, Any]:
-        """Obtiene estadísticas actuales de los datos"""
-        total_sitios = sum(len(sitios) for sitios in self.all_sitios.values())
+
+        existing_ids = {self.strategy.get_unique_identifier(item)
+                        for item in self.data_by_context[context_key]["items"]}
+        new_items = []
+        for item in items:
+            identifier = self.strategy.get_unique_identifier(item)
+            if identifier and identifier not in existing_ids:
+                new_items.append(item)
+                existing_ids.add(identifier)
+
+        self.data_by_context[context_key]["items"].extend(new_items)
         return {
-            'total_municipalities': len(self.all_sitios),
-            'total_sites': total_sitios,
-            'municipalities': list(self.all_sitios.keys()),
-            'sites_per_municipality': {municipio: len(sitios) for municipio, sitios in self.all_sitios.items()}
+            'new_items': len(new_items),
+            'duplicates_omitted': len(items) - len(new_items),
+            'total_items': len(self.data_by_context[context_key]["items"])
+        }
+
+    def save_context_data(self, context_key: str) -> bool:
+        """Guarda datos usando la clave de contexto para encontrar el objeto original."""
+        context_data = self.data_by_context.get(context_key)
+
+        if not context_data or not context_data.get("items"):
+            return False
+
+        context_obj = context_data["context_obj"]
+        items_in_memory = context_data["items"]
+        file_path = self.strategy.build_filepath(self.output_dir, context_obj)
+
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        data_to_save = {
+            "municipality": context_obj if isinstance(context_obj, str) else context_obj.get("municipio"),
+            "context": context_obj,
+            self.strategy.get_data_key(): items_in_memory,
+            "total": len(items_in_memory),
+            "fecha_extraccion": current_timestamp(),
+        }
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data_to_save, f, ensure_ascii=False, indent=4)
+            return True
+        except IOError as e:
+            print(f"[ERROR] No se pudo guardar datos para {context_obj}: {e}")
+            return False
+
+
+class DataHandler:
+    """
+    Clase Facade que proporciona una interfaz simple y unificada para
+    manejar diferentes tipos de datos.
+    """
+
+    def __init__(self, settings: Settings = None):
+        if settings is None:
+            settings = Settings()
+        self.sites = GenericDataHandler(
+            strategy=SitesStorageStrategy(),
+            output_dir=settings.SITIES_OUTPUT_DIR
+        )
+        self.reviewers = GenericDataHandler(
+            strategy=ReviewersStorageStrategy(),
+            output_dir=settings.REVIEWS_OUTPUT_DIR
+        )
+
+    def load_data_sities(self):
+        """Carga todos los datos para todas las estrategias."""
+        print("[INFO] Iniciando carga de todos los datos existentes...")
+        self.sites.load_all_data()
+        print("[INFO] Carga de datos finalizada.")
+    
+    def load_data_reviewers(self):
+        """Carga todos los datos para todas las estrategias."""
+        print("[INFO] Iniciando carga de todos los datos existentes...")
+        self.reviewers.load_all_data()
+        print("[INFO] Carga de datos finalizada.")
+
+    def add_sites(self, municipio: str, sites: List[Dict]) -> Dict[str, int]:
+        stats = self.sites.add_items(municipio, sites)
+        return {'new_sites': stats['new_items'], **stats}
+
+    def save_sites_data(self, municipio: str) -> bool:
+        return self.sites.save_context_data(str(municipio))
+
+    def add_reviewers(self, context: Dict, reviewers: List[Dict]) -> Dict[str, int]:
+        stats = self.reviewers.add_items(context, reviewers)
+        return {'new_reviewers': stats['new_items'], **stats}
+
+    def save_reviewers_data(self, context: Dict) -> bool:
+        return self.reviewers.save_context_data(str(context))
+
+    def save_all_data(self) -> None:
+        print("[INFO] Guardando todos los datos de sitios pendientes...")
+        contexts_to_save = list(self.sites.data_by_context.keys())
+        for context_key in contexts_to_save:
+            self.sites.save_context_data(context_key)
+
+        print("[INFO] Guardando todos los datos de usuarios pendientes...")
+        contexts_to_save = list(self.reviewers.data_by_context.keys())
+        for context_key in contexts_to_save:
+            self.reviewers.save_context_data(context_key)
+
+    def get_statistics(self) -> Dict[str, Any]:
+        sites_data = self.sites.data_by_context
+        total_sitios = sum(len(v['items']) for v in sites_data.values())
+
+        reviewers_data = self.reviewers.data_by_context
+        total_usuarios = sum(len(v['items']) for v in reviewers_data.values())
+
+        return {
+            'sites_stats': {
+                'total_municipalities': len(sites_data),
+                'total_sites': total_sitios,
+                'municipalities': [v['context_obj'] for v in sites_data.values()],
+                'sites_per_municipality': {
+                    k: len(v['items']) for k, v in sites_data.items()
+                }
+            },
+            'users_stats': {
+                'total_contexts': len(reviewers_data),
+                'total_users': total_usuarios,
+                'contexts': [v['context_obj'] for v in reviewers_data.values()],
+                'users_per_context': {
+                    k: len(v['items']) for k, v in reviewers_data.items()
+                }
+            }
         }
