@@ -9,3 +9,6 @@ credentials.txt
 *\__pycache__
 *\bloqueos_html
 *\__init__.py
+*\test
+*\.html
+*\.github
