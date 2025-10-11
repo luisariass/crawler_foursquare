@@ -47,13 +47,7 @@ class SitiesFetcher:
             start_index = self._get_resume_index(csv_path, start_index)
             df_urls = pd.read_csv(csv_path)
             df_urls = df_urls.iloc[start_index:end_index]
-            tasks = [
-                {
-                    'municipio': row['municipio'],
-                    'url_municipio': row['url_municipio']
-                }
-                for _, row in df_urls.iterrows()
-            ]
+            tasks = df_urls[['municipio', 'url_municipio']].to_dict('records')
             total_tasks = len(tasks)
             print(f"Iniciando scraping para {total_tasks} zonas.")
 
