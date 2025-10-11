@@ -11,3 +11,4 @@ credentials.txt
 *\__init__.py
 *.html
 caribbean_grid/data/MGN2020_URB_AREA_CENSAL
+*\.github
