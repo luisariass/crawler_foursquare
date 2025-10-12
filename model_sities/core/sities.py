@@ -36,7 +36,6 @@ class SitiesLogic:
             except PlaywrightTimeoutError:
                 print(f"[TIMEOUT] Timeout en intento {attempt} para {municipio}.")
                 if attempt == max_retries:
-                    self.register_failed_municipality(municipio, url, "timeout_final")
                     return ("timeout", [])
                 else:
                     wait_time = self.settings.BACKOFF_FACTOR * attempt
@@ -44,7 +43,6 @@ class SitiesLogic:
                     time.sleep(wait_time)
             except Exception as e:
                 print(f"[ERROR] Error inesperado en intento {attempt} para {municipio}: {e}")
-                self.register_failed_municipality(municipio, url, f"error_inesperado: {e}")
                 return ("error", [])
         return ("error", [])
 
