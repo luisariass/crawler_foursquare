@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: foursquare_mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: foursquare_scraping
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+
+  scraper_sities:
+    build:
+      context: .
+      dockerfile: Dockerfile.sities
+    container_name: foursquare_scraper_sities
+    depends_on:
+      - mongodb
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/
+      MONGODB_DATABASE: foursquare_scraping
+    volumes:
+      - ./caribbean_grid/data/zonas_departamentos:/app/caribbean_grid/data/zonas_departamentos:ro
+      - ./cookies_foursquare.json:/app/cookies_foursquare.json:ro
+    command: python -m model_sities.sities_fetcher --csv /app/caribbean_grid/data/zonas_departamentos/municipios_atlantico.csv
+  scraper_reviewers:
+    build:
+      context: .
+      dockerfile: Dockerfile.reviewers
+    container_name: foursquare_scraper_reviewers
+    depends_on:
+      - mongodb
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/
+      MONGODB_DATABASE: foursquare_scraping
+    volumes:
+      - ./cookies_foursquare.json:/app/cookies_foursquare.json:ro
+    command: python -m model_reviewers.reviewers_fetcher --n_reviewers 1000 --n_threads 5
+volumes:
+  mongodb_data:
+  mongodb_config:
