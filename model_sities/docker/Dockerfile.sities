@@ -1,0 +1,29 @@
+FROM mcr.microsoft.com/playwright/python:v1.52.0-jammy
+
+LABEL maintainer="proyecto_scrapping"
+LABEL description="Contenedor para scraping de sitios turísticos de Foursquare"
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+COPY model_sities/ ./model_sities/
+COPY caribbean_grid/data/zonas_departamentos/ ./caribbean_grid/data/zonas_departamentos/
+COPY cookies_foursquare.json ./cookies_foursquare.json
+
+RUN useradd -m -u 1000 scraper && \
+    chown -R scraper:scraper /app
+
+USER scraper
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "from model_sities.config.database import MongoDBConfig; MongoDBConfig.get_client().admin.command('ping')" || exit 1
+
+CMD ["python", "-m", "model_sities.sities_fetcher", "--csv", "caribbean_grid/data/zonas_departamentos"]
