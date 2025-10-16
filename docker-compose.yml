@@ -1,45 +1,48 @@
 version: '3.8'
 
 services:
-  mongodb:
-    image: mongo:7.0
-    container_name: foursquare_mongodb
-    restart: always
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_DATABASE: foursquare_scraping
-    volumes:
-      - mongodb_data:/data/db
-      - mongodb_config:/data/configdb
-
-  scraper_sities:
+  sities_scraper:
     build:
       context: .
-      dockerfile: Dockerfile.sities
-    container_name: foursquare_scraper_sities
-    depends_on:
-      - mongodb
+      dockerfile: model_sities/docker/Dockerfile.sities
+    image: foursquare_sities_scraper:latest
+    container_name: foursquare_sities_prod
+    restart: always
+    env_file:
+      - .env.production
     environment:
-      MONGODB_URI: mongodb://mongodb:27017/
-      MONGODB_DATABASE: foursquare_scraping
+      MONGODB_URI: ${MONGODB_URI}
+      MONGODB_DATABASE: ${MONGODB_DATABASE}
+      MONGODB_POOL_SIZE: 100
+      MONGODB_TIMEOUT_MS: 15000
+      PARALLEL_PROCESSES: 20
+      RATE_LIMIT_PER_HOUR: 500
     volumes:
+      - ./logs:/app/logs
       - ./caribbean_grid/data/zonas_departamentos:/app/caribbean_grid/data/zonas_departamentos:ro
       - ./cookies_foursquare.json:/app/cookies_foursquare.json:ro
-    command: python -m model_sities.sities_fetcher --csv /app/caribbean_grid/data/zonas_departamentos/municipios_atlantico.csv
-  scraper_reviewers:
-    build:
-      context: .
-      dockerfile: Dockerfile.reviewers
-    container_name: foursquare_scraper_reviewers
-    depends_on:
-      - mongodb
-    environment:
-      MONGODB_URI: mongodb://mongodb:27017/
-      MONGODB_DATABASE: foursquare_scraping
-    volumes:
-      - ./cookies_foursquare.json:/app/cookies_foursquare.json:ro
-    command: python -m model_reviewers.reviewers_fetcher --n_reviewers 1000 --n_threads 5
-volumes:
-  mongodb_data:
-  mongodb_config:
+    networks:
+      - scraper_network
+    deploy:
+      resources:
+        limits:
+          cpus: '6'
+          memory: 12G
+        reservations:
+          cpus: '3'
+          memory: 6G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from model_sities.config.database import MongoDBConfig; MongoDBConfig.get_client().admin.command('ping')"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+networks:
+  scraper_network:
+    driver: bridge

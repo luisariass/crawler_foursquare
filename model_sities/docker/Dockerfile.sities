@@ -1,14 +1,10 @@
 FROM mcr.microsoft.com/playwright/python:v1.52.0-jammy
 
-LABEL maintainer="proyecto_scrapping"
-LABEL description="Contenedor para scraping de sitios turísticos de Foursquare"
-
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_NO_CACHE_DIR=1
 
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
@@ -16,7 +12,7 @@ RUN pip install --upgrade pip && \
 
 COPY model_sities/ ./model_sities/
 COPY caribbean_grid/data/zonas_departamentos/ ./caribbean_grid/data/zonas_departamentos/
-COPY cookies_foursquare.json ./cookies_foursquare.json
+COPY model_sities/data/cookies_foursquare.json ./cookies_foursquare.json
 
 RUN useradd -m -u 1000 scraper && \
     chown -R scraper:scraper /app
