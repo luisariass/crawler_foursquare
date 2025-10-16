@@ -1,4 +1,4 @@
-"""Gestión y almacenamiento de datos usando MongoDB Atlas."""
+"""Gestión de datos con consultas optimizadas por municipio."""
 
 from typing import Dict, List, Any, Optional
 from pymongo.errors import DuplicateKeyError
@@ -8,28 +8,35 @@ from ..utils.helpers import current_timestamp
 
 
 class MongoDataHandler:
-    """Manejador de datos que persiste en MongoDB Atlas."""
+    """Manejador de datos con consultas optimizadas."""
     
     def __init__(self):
         self.db = MongoDBConfig.get_database()
         self.sities_collection = self.db[MongoDBConfig.COLLECTION_SITIES]
-        self.reviewers_collection = self.db[MongoDBConfig.COLLECTION_REVIEWERS]
+        self.reviewers_collection = self.db[
+            MongoDBConfig.COLLECTION_REVIEWERS
+        ]
         self.progress_collection = self.db[MongoDBConfig.COLLECTION_PROGRESS]
+        self.stats_collection = self.db[MongoDBConfig.COLLECTION_SITIES_STATS]
     
     def load_data_sities(self):
         """Carga datos de sitios desde MongoDB."""
         total_sites = self.sities_collection.count_documents({})
-        print(f"[INFO] Cargados {total_sites} sitios existentes desde MongoDB.")
+        print(f"[INFO] Cargados {total_sites} sitios desde MongoDB.")
     
     def load_data_reviewers(self):
         """Carga datos de reviewers desde MongoDB."""
         total_reviewers = self.reviewers_collection.count_documents({})
-        print(f"[INFO] Cargados {total_reviewers} reviewers existentes desde MongoDB.")
+        print(f"[INFO] Cargados {total_reviewers} reviewers desde MongoDB.")
     
     def add_sites(self, municipio: str, sites: List[Dict]) -> Dict[str, int]:
-        """Añade sitios a MongoDB, evitando duplicados por url_sitio."""
+        """Añade sitios a MongoDB evitando duplicados."""
         if not sites:
-            return {'new_sites': 0, 'duplicates_omitted': 0, 'total_items': 0}
+            return {
+                'new_sites': 0,
+                'duplicates_omitted': 0,
+                'total_items': 0
+            }
         
         new_count = 0
         duplicates_count = 0
@@ -54,16 +61,106 @@ class MongoDataHandler:
             'total_items': total_in_db
         }
     
-    def save_sites_data(self, municipio: str) -> bool:
-        """Método de compatibilidad. Los datos ya están guardados."""
-        return True
+    def get_sites_by_municipio(
+        self,
+        municipio: str,
+        limit: int = 100,
+        skip: int = 0,
+        sort_by: str = "fecha_extraccion",
+        sort_order: int = -1
+    ) -> List[Dict]:
+        """Obtiene sitios de un municipio con paginación."""
+        cursor = self.sities_collection.find(
+            {"municipio": municipio},
+            {"_id": 0}
+        ).sort(sort_by, sort_order).skip(skip).limit(limit)
+        
+        return list(cursor)
+    
+    def get_sites_by_categoria(
+        self,
+        municipio: str,
+        categoria: str
+    ) -> List[Dict]:
+        """Obtiene sitios filtrados por municipio y categoría."""
+        cursor = self.sities_collection.find(
+            {
+                "municipio": municipio,
+                "categoria": categoria
+            },
+            {"_id": 0}
+        )
+        
+        return list(cursor)
+    
+    def get_top_sites_by_municipio(
+        self,
+        municipio: str,
+        limit: int = 10
+    ) -> List[Dict]:
+        """Obtiene mejores sitios de un municipio por puntuación."""
+        cursor = self.sities_collection.find(
+            {"municipio": municipio},
+            {"_id": 0}
+        ).sort("puntuacion", -1).limit(limit)
+        
+        return list(cursor)
+    
+    def get_municipio_summary(self, municipio: str) -> Dict[str, Any]:
+        """Obtiene resumen estadístico de un municipio."""
+        stats = self.stats_collection.find_one(
+            {"municipio": municipio},
+            {"_id": 0}
+        )
+        
+        if stats:
+            return stats
+        
+        pipeline = [
+            {"$match": {"municipio": municipio}},
+            {
+                "$group": {
+                    "_id": None,
+                    "total_sitios": {"$sum": 1},
+                    "categorias": {"$addToSet": "$categoria"},
+                    "puntuacion_promedio": {
+                        "$avg": {"$toDouble": "$puntuacion"}
+                    }
+                }
+            }
+        ]
+        
+        result = list(self.sities_collection.aggregate(pipeline))
+        
+        if result:
+            return {
+                "municipio": municipio,
+                "total_sitios": result[0]["total_sitios"],
+                "total_categorias": len(result[0]["categorias"]),
+                "categorias": result[0]["categorias"],
+                "puntuacion_promedio": round(
+                    result[0]["puntuacion_promedio"],
+                    2
+                )
+            }
+        
+        return {}
+    
+    def get_all_municipios(self) -> List[str]:
+        """Obtiene lista de todos los municipios únicos."""
+        return self.sities_collection.distinct("municipio")
+    
+    def refresh_stats(self):
+        """Refresca las estadísticas materializadas."""
+        MongoDBConfig.create_materialized_views()
+        print("[INFO] Estadísticas actualizadas correctamente.")
     
     def add_reviewers(
         self,
         context: Dict,
         reviewers: List[Dict]
     ) -> Dict[str, int]:
-        """Añade reviewers a MongoDB, evitando duplicados."""
+        """Añade reviewers a MongoDB evitando duplicados."""
         if not reviewers:
             return {
                 'new_reviewers': 0,
@@ -104,25 +201,38 @@ class MongoDataHandler:
             'total_items': total_in_db
         }
     
+    def save_sites_data(self, municipio: str) -> bool:
+        """Método de compatibilidad."""
+        return True
+    
     def save_reviewers_data(self, context: Dict) -> bool:
-        """Método de compatibilidad. Los datos ya están guardados."""
+        """Método de compatibilidad."""
         return True
     
     def save_all_data(self) -> None:
-        """Método de compatibilidad. MongoDB guarda automáticamente."""
+        """Método de compatibilidad."""
         print("[INFO] Datos persistidos en MongoDB Atlas.")
     
     def get_statistics(self) -> Dict[str, Any]:
-        """Obtiene estadísticas desde MongoDB."""
-        total_sites = self.sities_collection.count_documents({})
+        """Obtiene estadísticas generales desde vistas materializadas."""
+        stats_list = list(self.stats_collection.find({}, {"_id": 0}))
         
-        pipeline_sites = [
-            {"$group": {"_id": "$municipio", "count": {"$sum": 1}}}
-        ]
-        sites_by_municipio = list(
-            self.sities_collection.aggregate(pipeline_sites)
-        )
+        total_sites = sum(s.get("total_sitios", 0) for s in stats_list)
         
+        return {
+            'sites_stats': {
+                'total_municipalities': len(stats_list),
+                'total_sites': total_sites,
+                'sites_per_municipality': {
+                    s['municipio']: s['total_sitios'] for s in stats_list
+                },
+                'detailed_stats': stats_list
+            },
+            'reviewers_stats': self._get_reviewers_stats()
+        }
+    
+    def _get_reviewers_stats(self) -> Dict[str, Any]:
+        """Obtiene estadísticas de reviewers."""
         total_reviewers = self.reviewers_collection.count_documents({})
         
         pipeline_reviewers = [
@@ -133,20 +243,11 @@ class MongoDataHandler:
         )
         
         return {
-            'sites_stats': {
-                'total_municipalities': len(sites_by_municipio),
-                'total_sites': total_sites,
-                'sites_per_municipality': {
-                    item['_id']: item['count'] for item in sites_by_municipio
-                }
-            },
-            'reviewers_stats': {
-                'total_contexts': len(reviewers_by_municipio),
-                'total_reviewers': total_reviewers,
-                'reviewers_per_municipality': {
-                    item['_id']: item['count']
-                    for item in reviewers_by_municipio
-                }
+            'total_contexts': len(reviewers_by_municipio),
+            'total_reviewers': total_reviewers,
+            'reviewers_per_municipality': {
+                item['_id']: item['count']
+                for item in reviewers_by_municipio
             }
         }
     
