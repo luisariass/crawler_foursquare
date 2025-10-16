@@ -1,8 +1,8 @@
-"""Configuración centralizada para MongoDB Atlas."""
+"""Configuración centralizada para MongoDB Atlas con índices optimizados."""
 
 import os
 from typing import Optional
-from pymongo import MongoClient, ASCENDING
+from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import ConnectionFailure
 from dotenv import load_dotenv
 
@@ -12,12 +12,8 @@ load_dotenv()
 class MongoDBConfig:
     """Gestiona la conexión y configuración de MongoDB Atlas."""
     
-    MONGODB_URI = os.getenv(
-        "MONGODB_URI"
-    )
-    MONGODB_DATABASE = os.getenv(
-        "MONGODB_DATABASE"
-    )
+    MONGODB_URI = os.getenv("MONGODB_URI")
+    MONGODB_DATABASE = os.getenv("MONGODB_DATABASE")
     
     CONNECTION_POOL_SIZE = int(os.getenv("MONGODB_POOL_SIZE", "50"))
     CONNECTION_TIMEOUT_MS = int(os.getenv("MONGODB_TIMEOUT_MS", "10000"))
@@ -26,6 +22,7 @@ class MongoDBConfig:
     COLLECTION_SITIES = "sities"
     COLLECTION_REVIEWERS = "reviewers"
     COLLECTION_PROGRESS = "progress"
+    COLLECTION_SITIES_STATS = "sities_stats"
     
     _client: Optional[MongoClient] = None
     _db = None
@@ -49,7 +46,7 @@ class MongoDBConfig:
             )
             try:
                 cls._client.admin.command('ping')
-                print("[INFO] Conexión a MongoDB Atlas establecida correctamente.")
+                print("[INFO] Conexión a MongoDB Atlas establecida.")
             except ConnectionFailure as e:
                 print(f"[ERROR] No se pudo conectar a MongoDB Atlas: {e}")
                 raise
@@ -66,7 +63,7 @@ class MongoDBConfig:
     
     @classmethod
     def _create_indexes(cls):
-        """Crea índices optimizados para las colecciones."""
+        """Crea índices optimizados para consultas por municipio."""
         db = cls._db
         
         db[cls.COLLECTION_SITIES].create_index(
@@ -74,10 +71,22 @@ class MongoDBConfig:
             unique=True,
             name="idx_url_sitio_unique"
         )
+        
         db[cls.COLLECTION_SITIES].create_index(
-            [("municipio", ASCENDING)],
-            name="idx_municipio"
+            [("municipio", ASCENDING), ("fecha_extraccion", DESCENDING)],
+            name="idx_municipio_fecha"
         )
+        
+        db[cls.COLLECTION_SITIES].create_index(
+            [("municipio", ASCENDING), ("categoria", ASCENDING)],
+            name="idx_municipio_categoria"
+        )
+        
+        db[cls.COLLECTION_SITIES].create_index(
+            [("municipio", ASCENDING), ("puntuacion", DESCENDING)],
+            name="idx_municipio_puntuacion"
+        )
+        
         db[cls.COLLECTION_SITIES].create_index(
             [("id", ASCENDING)],
             name="idx_id"
@@ -104,6 +113,52 @@ class MongoDBConfig:
         )
         
         print("[INFO] Índices de MongoDB creados correctamente.")
+    
+    @classmethod
+    def create_materialized_views(cls):
+        """Crea vistas materializadas para estadísticas por municipio."""
+        db = cls._db
+        
+        db[cls.COLLECTION_SITIES_STATS].drop()
+        
+        pipeline = [
+            {
+                "$group": {
+                    "_id": "$municipio",
+                    "total_sitios": {"$sum": 1},
+                    "categorias_unicas": {"$addToSet": "$categoria"},
+                    "puntuacion_promedio": {
+                        "$avg": {"$toDouble": "$puntuacion"}
+                    },
+                    "ultima_actualizacion": {"$max": "$fecha_extraccion"}
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "municipio": "$_id",
+                    "total_sitios": 1,
+                    "total_categorias": {"$size": "$categorias_unicas"},
+                    "categorias": "$categorias_unicas",
+                    "puntuacion_promedio": {
+                        "$round": ["$puntuacion_promedio", 2]
+                    },
+                    "ultima_actualizacion": 1
+                }
+            },
+            {
+                "$out": cls.COLLECTION_SITIES_STATS
+            }
+        ]
+        
+        db[cls.COLLECTION_SITIES].aggregate(pipeline)
+        
+        db[cls.COLLECTION_SITIES_STATS].create_index(
+            [("municipio", ASCENDING)],
+            unique=True
+        )
+        
+        print("[INFO] Vistas materializadas creadas correctamente.")
     
     @classmethod
     def close_connection(cls):
