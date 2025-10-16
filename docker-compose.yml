@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  sities_scraper:
+    build:
+      context: .
+      dockerfile: model_sities/docker/Dockerfile.sities
+    image: luisarias/foursquare_sities_scraper:latest
+    container_name: foursquare_sities_prod
+    restart: always
+    env_file:
+      - .env.production
+    environment:
+      MONGODB_URI: ${MONGODB_URI}
+      MONGODB_DATABASE: ${MONGODB_DATABASE}
+      MONGODB_POOL_SIZE: ${MONGODB_POOL_SIZE}
+      MONGODB_TIMEOUT_MS: ${MONGODB_TIMEOUT_MS}
+      PARALLEL_PROCESSES: ${PARALLEL_PROCESSES}
+      RATE_LIMIT_PER_HOUR: ${RATE_LIMIT_PER_HOUR}
+    volumes:
+      - ./logs:/app/logs
+      - ./caribbean_grid/data/zonas_departamentos:/app/caribbean_grid/data/zonas_departamentos:ro
+      - ./model_sities/data/cookies_foursquare.json:/app/cookies_foursquare.json:ro
+    networks:
+      - scraper_network
+    deploy:
+      resources:
+        limits:
+          cpus: '6'
+          memory: 12G
+        reservations:
+          cpus: '3'
+          memory: 6G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from model_sities.config.database import MongoDBConfig; MongoDBConfig.get_client().admin.command('ping')"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+networks:
+  scraper_network:
+    driver: bridge
