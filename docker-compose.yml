@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: model_sities/docker/Dockerfile.sities
-    image: foursquare_sities_scraper:latest
+    image: luisarias/foursquare_sities_scraper:latest
     container_name: foursquare_sities_prod
     restart: always
     env_file:
@@ -13,14 +13,14 @@ services:
     environment:
       MONGODB_URI: ${MONGODB_URI}
       MONGODB_DATABASE: ${MONGODB_DATABASE}
-      MONGODB_POOL_SIZE: 100
-      MONGODB_TIMEOUT_MS: 15000
-      PARALLEL_PROCESSES: 20
-      RATE_LIMIT_PER_HOUR: 500
+      MONGODB_POOL_SIZE: ${MONGODB_POOL_SIZE}
+      MONGODB_TIMEOUT_MS: ${MONGODB_TIMEOUT_MS}
+      PARALLEL_PROCESSES: ${PARALLEL_PROCESSES}
+      RATE_LIMIT_PER_HOUR: ${RATE_LIMIT_PER_HOUR}
     volumes:
       - ./logs:/app/logs
       - ./caribbean_grid/data/zonas_departamentos:/app/caribbean_grid/data/zonas_departamentos:ro
-      - ./cookies_foursquare.json:/app/cookies_foursquare.json:ro
+      - ./model_sities/data/cookies_foursquare.json:/app/cookies_foursquare.json:ro
     networks:
       - scraper_network
     deploy:

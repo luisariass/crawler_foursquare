@@ -14,10 +14,8 @@ COPY model_sities/ ./model_sities/
 COPY caribbean_grid/data/zonas_departamentos/ ./caribbean_grid/data/zonas_departamentos/
 COPY model_sities/data/cookies_foursquare.json ./cookies_foursquare.json
 
-RUN useradd -m -u 1000 scraper && \
-    chown -R scraper:scraper /app
-
-USER scraper
+RUN mkdir -p /app/logs && \
+    chmod -R 755 /app
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "from model_sities.config.database import MongoDBConfig; MongoDBConfig.get_client().admin.command('ping')" || exit 1
