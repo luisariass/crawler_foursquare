@@ -1,9 +1,12 @@
 #!/bin/bash
-# filepath: c:\Users\luisarias\Documents\proyecto_scrapping\model_sities\script\deploy.sh
 
 set -e
 
 echo "[INFO] Iniciando despliegue en VM..."
+
+PROJECT_ROOT="/home/scraper/proyecto_scrapping"
+
+cd ${PROJECT_ROOT}
 
 if [ ! -f .env.production ]; then
     echo "[ERROR] Archivo .env.production no encontrado"
@@ -12,8 +15,8 @@ fi
 
 mkdir -p logs
 
-echo "[INFO] Construyendo imagen Docker..."
-docker-compose -f docker-compose.yml build --no-cache
+echo "[INFO] Descargando imagen desde Docker Hub..."
+docker pull luisarias/foursquare_sities_scraper:latest
 
 echo "[INFO] Deteniendo contenedor anterior..."
 docker-compose -f docker-compose.yml down 2>/dev/null || true
@@ -24,7 +27,7 @@ docker volume prune -f 2>/dev/null || true
 echo "[INFO] Iniciando contenedor..."
 docker-compose -f docker-compose.yml up -d
 
-echo "[INFO] Esperando a que el contenedor esté listo..."
+echo "[INFO] Esperando a que el contenedor este listo..."
 sleep 10
 
 echo "[INFO] Verificando estado del contenedor..."
