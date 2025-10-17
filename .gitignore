@@ -13,4 +13,4 @@ credentials.txt
 *\.html
 *\.github
 caribbean_grid/data/MGN2020_URB_AREA_CENSAL
-.env.production
+.env
