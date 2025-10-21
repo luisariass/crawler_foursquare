@@ -1,6 +1,6 @@
 venv
 sitios_turisticos
-*\.gitignore
+.gitignore
 credentials.txt
 *.csv
 *.xlsx
@@ -14,3 +14,4 @@ credentials.txt
 *\.github
 caribbean_grid/data/MGN2020_URB_AREA_CENSAL
 .env
+.idea
