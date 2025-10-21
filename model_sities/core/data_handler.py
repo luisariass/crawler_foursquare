@@ -29,7 +29,8 @@ class MongoDataHandler:
         total_reviewers = self.reviewers_collection.count_documents({})
         print(f"[INFO] Cargados {total_reviewers} reviewers desde MongoDB.")
     
-    def add_sites(self, municipio: str, sites: List[Dict]) -> Dict[str, int]:
+
+    def add_sites(self, municipio: str, departamento: str, sites: List[Dict]) -> Dict[str, int]:  # Agregado departamento como parámetro, replicando municipio
         """Añade sitios a MongoDB evitando duplicados."""
         if not sites:
             return {
@@ -43,6 +44,7 @@ class MongoDataHandler:
         
         for site in sites:
             site['municipio'] = municipio
+            site['departamento'] = departamento  # Agregado, replicando municipio
             site['fecha_extraccion'] = current_timestamp()
             
             try:

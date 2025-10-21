@@ -100,13 +100,15 @@ class SiteScraperWorker(BaseScraperWorker):
     def scrape(self, page, task_info: Dict[str, Any]) -> Tuple[str, List]:
         url = task_info['url_municipio']
         municipio = task_info['municipio']
+        departamento = task_info['departamento']
         
         sities = SitiesLogic()
-        return sities.extract_sites(page, url, municipio)
-    
+        return sities.extract_sites(page, url, municipio, departamento)
+
     def get_default_result(self, task_info: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "municipio": task_info['municipio'],
+            "departamento": task_info['departamento'],
             "sites": []
         }
 

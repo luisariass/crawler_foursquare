@@ -16,7 +16,7 @@ class SitiesLogic:
         """Inicializa el scraper"""
         self.settings = Settings()
     
-    def extract_sites(self, page, url, municipio: str = "") -> tuple:
+    def extract_sites(self, page, url, municipio: str = "", departamento: str = "") -> tuple:  # Agregado departamento como parámetro, replicando municipio
         """
         Realiza el scraping de sitios turísticos en Foursquare con manejo de reintentos y errores.
         """
@@ -25,16 +25,16 @@ class SitiesLogic:
 
         for attempt in range(1, max_retries + 1):
             try:
-                print(f"Intento {attempt}/{max_retries} para {municipio}")
+                print(f"Intento {attempt}/{max_retries} para {municipio}")  # Mantener uso de municipio en print; departamento no se usa aquí para evitar cambios innecesarios, pero podría agregarse si se quiere replicar exactamente en logs
                 page.goto(url, timeout=timeout)
                 self._handle_map_search_button(page)
-                result = self._wait_and_check_early_exit(page, municipio)
+                result = self._wait_and_check_early_exit(page, municipio)  # Pasar municipio aquí, como antes
                 if result is not None:
                     return result
                 sitios_list = self._scrape_sites(page)
                 return ("success", sitios_list)
             except PlaywrightTimeoutError:
-                print(f"[TIMEOUT] Timeout en intento {attempt} para {municipio}.")
+                print(f"[TIMEOUT] Timeout en intento {attempt} para {municipio}.")  # Mantener municipio en print
                 if attempt == max_retries:
                     return ("timeout", [])
                 else:
@@ -42,7 +42,7 @@ class SitiesLogic:
                     print(f"Esperando {wait_time} segundos antes de reintentar...")
                     time.sleep(wait_time)
             except Exception as e:
-                print(f"[ERROR] Error inesperado en intento {attempt} para {municipio}: {e}")
+                print(f"[ERROR] Error inesperado en intento {attempt} para {municipio}: {e}")  # Mantener municipio en print
                 return ("error", [])
         return ("error", [])
 
