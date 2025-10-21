@@ -50,7 +50,17 @@ class MongoDataHandler:
                 new_count += 1
             except DuplicateKeyError:
                 duplicates_count += 1
-
+        
+        total_in_db = self.sities_collection.count_documents(
+            {'municipio': municipio}
+        )
+        
+        return {
+            'new_sites': new_count,
+            'duplicates_omitted': duplicates_count,
+            'total_items': total_in_db
+        }
+    
     def get_sites_by_municipio(
         self,
         municipio: str,
