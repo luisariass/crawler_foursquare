@@ -8,8 +8,8 @@ PROJECT_ROOT="/home/scraper/proyecto_scrapping"
 
 cd ${PROJECT_ROOT}
 
-if [ ! -f .env.production ]; then
-    echo "[ERROR] Archivo .env.production no encontrado"
+if [[ ! -f .env ]]; then
+    echo "[ERROR] Archivo .env no encontrado"
     exit 1
 fi
 
