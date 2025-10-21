@@ -137,7 +137,7 @@ class SitiesFetcher:
     
     def _get_resume_index(self, csv_path: str, start_index: int) -> int:
         """Determina el índice de inicio considerando progreso guardado."""
-        progress = self.data_handler.load_progress('sities_fetcher')
+        progress = self.data_handler.load_progress('sities_fetcher', csv_path)
         
         if progress and progress.get("csv_path") == csv_path:
             resume_index = progress.get("idx_actual", -1) + 1

@@ -50,17 +50,7 @@ class MongoDataHandler:
                 new_count += 1
             except DuplicateKeyError:
                 duplicates_count += 1
-        
-        total_in_db = self.sities_collection.count_documents(
-            {'municipio': municipio}
-        )
-        
-        return {
-            'new_sites': new_count,
-            'duplicates_omitted': duplicates_count,
-            'total_items': total_in_db
-        }
-    
+
     def get_sites_by_municipio(
         self,
         municipio: str,
@@ -285,9 +275,28 @@ class MongoDataHandler:
             upsert=True
         )
     
-    def load_progress(self, module: str) -> Optional[Dict]:
-        """Carga el progreso del scraping desde MongoDB."""
+    def load_progress(
+        self,
+        module: str,
+        csv_path: Optional[str] = None
+    ) -> Optional[Dict]:
+        """
+        Carga el progreso del scraping desde MongoDB.
+        
+        Args:
+            module: Nombre del módulo (ej: 'sities_fetcher').
+            csv_path: Ruta del CSV (opcional). Si se proporciona,
+                    busca el progreso específico para ese CSV.
+        
+        Returns:
+            Documento de progreso o None si no existe.
+        """
+        query = {'module': module}
+        
+        if csv_path:
+            query['csv_path'] = csv_path
+        
         return self.progress_collection.find_one(
-            {'module': module},
+            query,
             {'_id': 0}
         )
