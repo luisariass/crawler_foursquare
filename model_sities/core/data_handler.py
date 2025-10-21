@@ -29,7 +29,8 @@ class MongoDataHandler:
         total_reviewers = self.reviewers_collection.count_documents({})
         print(f"[INFO] Cargados {total_reviewers} reviewers desde MongoDB.")
     
-    def add_sites(self, municipio: str, sites: List[Dict]) -> Dict[str, int]:
+
+    def add_sites(self, municipio: str, departamento: str, sites: List[Dict]) -> Dict[str, int]:  # Agregado departamento como parámetro, replicando municipio
         """Añade sitios a MongoDB evitando duplicados."""
         if not sites:
             return {
@@ -43,6 +44,7 @@ class MongoDataHandler:
         
         for site in sites:
             site['municipio'] = municipio
+            site['departamento'] = departamento  # Agregado, replicando municipio
             site['fecha_extraccion'] = current_timestamp()
             
             try:
@@ -285,9 +287,28 @@ class MongoDataHandler:
             upsert=True
         )
     
-    def load_progress(self, module: str) -> Optional[Dict]:
-        """Carga el progreso del scraping desde MongoDB."""
+    def load_progress(
+        self,
+        module: str,
+        csv_path: Optional[str] = None
+    ) -> Optional[Dict]:
+        """
+        Carga el progreso del scraping desde MongoDB.
+        
+        Args:
+            module: Nombre del módulo (ej: 'sities_fetcher').
+            csv_path: Ruta del CSV (opcional). Si se proporciona,
+                    busca el progreso específico para ese CSV.
+        
+        Returns:
+            Documento de progreso o None si no existe.
+        """
+        query = {'module': module}
+        
+        if csv_path:
+            query['csv_path'] = csv_path
+        
         return self.progress_collection.find_one(
-            {'module': module},
+            query,
             {'_id': 0}
         )

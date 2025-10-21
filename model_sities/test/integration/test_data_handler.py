@@ -9,6 +9,7 @@ from model_sities.config.database import MongoDBConfig
 
 
 TEST_MUNICIPIO = "test_municipio"
+TEST_DEPARTAMENTO = "test_departamento"
 TEST_SITE_ID = "test_site_id"
 TEST_SITE_NAME = "Test Site"
 TEST_USER_URL = "https://foursquare.com/user/test"
@@ -58,12 +59,12 @@ class TestMongoDataHandlerIntegration(unittest.TestCase):
                 'puntuacion': '4.0'
             }
         ]
-        result = self.handler.add_sites(TEST_MUNICIPIO, sites)
+        result = self.handler.add_sites(TEST_MUNICIPIO, TEST_DEPARTAMENTO, sites)
         self.assertEqual(result['new_sites'], 2)
         self.assertEqual(result['duplicates_omitted'], 0)
 
         # Intentar insertar los mismos sitios (deberían ser duplicados)
-        result_dup = self.handler.add_sites(TEST_MUNICIPIO, sites)
+        result_dup = self.handler.add_sites(TEST_MUNICIPIO, TEST_DEPARTAMENTO, sites)
         self.assertEqual(result_dup['new_sites'], 0)
         self.assertEqual(result_dup['duplicates_omitted'], 2)
 

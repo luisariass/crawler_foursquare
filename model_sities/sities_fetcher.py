@@ -107,7 +107,7 @@ class SitiesFetcher:
         df_urls = pd.read_csv(csv_path)
         df_to_process = df_urls.iloc[start_index:end_index]
         tasks = df_to_process[
-            ['municipio', 'url_municipio']
+            ['municipio', 'departamento', 'url_municipio']  # Agregado 'departamento' aquí, replicando 'municipio'
         ].to_dict('records')
         total_tasks = len(tasks)
         
@@ -137,7 +137,7 @@ class SitiesFetcher:
     
     def _get_resume_index(self, csv_path: str, start_index: int) -> int:
         """Determina el índice de inicio considerando progreso guardado."""
-        progress = self.data_handler.load_progress('sities_fetcher')
+        progress = self.data_handler.load_progress('sities_fetcher', csv_path)
         
         if progress and progress.get("csv_path") == csv_path:
             resume_index = progress.get("idx_actual", -1) + 1
@@ -174,10 +174,11 @@ class SitiesFetcher:
         """Maneja el resultado de una tarea individual."""
         status = result.get("status")
         municipio = result.get("municipio")
+        departamento = result.get("departamento")
         sites_found = result.get("sites", [])
         
         if status == "success" and sites_found:
-            stats = self.data_handler.add_sites(municipio, sites_found)
+            stats = self.data_handler.add_sites(municipio, departamento, sites_found)
             print(
                 f"\n[INFO] Municipio {municipio}: "
                 f"{stats['new_sites']} sitios nuevos, "
