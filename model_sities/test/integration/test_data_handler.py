@@ -1,6 +1,4 @@
-import os
 import unittest
-from typing import Dict, List, Any
 from model_sities.core.data_handler import MongoDataHandler
 from model_sities.config.database import MongoDBConfig
 

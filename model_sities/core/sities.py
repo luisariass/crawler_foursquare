@@ -110,8 +110,8 @@ class SitiesLogic:
                     )
                 else:
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ERROR] Error al cargar más resultados: {e}")
 
     def _extract_site_data(self, sitio) -> Dict[str, Any]:
         """Extrae datos de un sitio individual, usando el ID de la URL."""
