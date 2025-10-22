@@ -2,209 +2,166 @@
 Orquestador principal para la extracción de sitios turísticos.
 Versión actualizada con MongoDB Atlas y soporte para directorios.
 """
-
 import os
-import glob
 import signal
 import argparse
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Dict, Any, Iterator, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, Dict, Any, List
 from pathlib import Path
 
 from .config.settings import Settings
 from .core.data_handler import MongoDataHandler
-from .config.database import MongoDBConfig
-from .utils.helpers import print_progress, current_timestamp
+from .utils.helpers import print_progress
 from .utils.worker_helper import worker_sities, shutdown_event
 
 
 class SitiesFetcher:
     """Aplicación principal para coordinar el scraping con MongoDB Atlas."""
-    
+
     def __init__(self) -> None:
         self.settings = Settings()
         self.data_handler = MongoDataHandler()
-        self._original_sigint_handler = None
-    
+        self._setup_signal_handler()
+
     def _setup_signal_handler(self) -> None:
-        """Configura el manejador para Ctrl+C."""
-        self._original_sigint_handler = signal.getsignal(signal.SIGINT)
+        """Configura manejadores de señales para apagado controlado."""
         signal.signal(signal.SIGINT, self._handle_shutdown)
-    
+        signal.signal(signal.SIGTERM, self._handle_shutdown)
+
     def _handle_shutdown(self, signum: int, frame: Any) -> None:
-        """Manejador de señal de apagado."""
-        print("\n[SHUTDOWN] Señal de apagado recibida. Terminando hilos...")
+        """Maneja señales de apagado de forma controlada."""
+        print(f"\n[SHUTDOWN] Señal {signum} recibida. Apagado en curso...")
         shutdown_event.set()
-        if self._original_sigint_handler:
-            signal.signal(signal.SIGINT, self._original_sigint_handler)
-    
+
     def _get_csv_files(self, path: str) -> List[str]:
-        """
-        Obtiene lista de archivos CSV desde una ruta.
-        Si es archivo, retorna lista con ese archivo.
-        Si es directorio, retorna todos los CSV dentro.
-        """
+        """Obtiene lista de archivos CSV desde un directorio o archivo."""
         path_obj = Path(path)
-        
         if path_obj.is_file() and path_obj.suffix == '.csv':
             return [str(path_obj)]
         elif path_obj.is_dir():
-            csv_files = glob.glob(os.path.join(path, "*.csv"))
-            if not csv_files:
-                print(f"[WARN] No se encontraron archivos CSV en {path}")
-            return sorted(csv_files)
-        else:
-            print(f"[ERROR] La ruta {path} no es válida")
-            return []
-    
+            return sorted([str(f) for f in path_obj.glob('*.csv')])
+        raise ValueError(f"Ruta inválida o sin archivos CSV: {path}")
+
     def run(
         self,
         csv_path: str,
         start_index: int = 0,
         end_index: Optional[int] = None
     ) -> None:
-        """
-        Ejecuta el proceso de scraping en paralelo.
-        Puede procesar un CSV individual o todos los CSVs de un directorio.
-        """
-        self._setup_signal_handler()
-        
-        try:
-            csv_files = self._get_csv_files(csv_path)
-            
-            if not csv_files:
-                print("[ERROR] No hay archivos CSV para procesar.")
-                return
-            
-            print(f"[INFO] Se procesarán {len(csv_files)} archivo(s) CSV")
-            
-            for csv_file in csv_files:
-                if shutdown_event.is_set():
-                    print("[INFO] Detención solicitada. Saliendo...")
-                    break
-                
-                print(f"[INFO] Procesando archivo: {os.path.basename(csv_file)}")
-                                
-                self._process_single_csv(
-                    csv_file,
-                    start_index,
-                    end_index
-                )
-        finally:
-            self._finalize_data()
-    
+        """Ejecuta el scraping para uno o múltiples CSVs."""
+        csv_files = self._get_csv_files(csv_path)
+        print(f"[INFO] Se procesarán {len(csv_files)} archivo(s) CSV.")
+
+        for csv_file in csv_files:
+            if shutdown_event.is_set():
+                print("[SHUTDOWN] Proceso detenido antes de iniciar nuevo CSV.")
+                break
+            print(f"\n[INFO] Procesando archivo: {os.path.basename(csv_file)}")
+            self._process_single_csv(csv_file, start_index, end_index)
+
+        self._finalize_data()
+
     def _process_single_csv(
         self,
         csv_path: str,
         start_index: int = 0,
         end_index: Optional[int] = None
     ) -> None:
-        """Procesa un único archivo CSV."""
+        """
+        Procesa un CSV usando un patrón robusto con as_completed para
+        evitar bloqueos y manejar timeouts individuales.
+        """
         self._load_initial_data()
-        start_index = self._get_resume_index(csv_path, start_index)
-        
+        resume_index = self._get_resume_index(csv_path, start_index)
+
         df_urls = pd.read_csv(csv_path)
-        df_to_process = df_urls.iloc[start_index:end_index]
+        df_to_process = df_urls.iloc[resume_index:end_index]
         tasks = df_to_process[
-            ['municipio', 'departamento', 'url_municipio']  # Agregado 'departamento' aquí, replicando 'municipio'
+            ['municipio', 'departamento', 'url_municipio']
         ].to_dict('records')
         total_tasks = len(tasks)
-        
-        if total_tasks == 0:
-            print(f"[INFO] No hay nuevas zonas para procesar en {csv_path}.")
+
+        if not tasks:
+            print(f"[INFO] No hay tareas nuevas para procesar en {csv_path}")
             return
-        
-        print(f"[INFO] Iniciando scraping para {total_tasks} zonas.")
-        
+
+        print(f"[INFO] {total_tasks} tareas para procesar.")
+        completed_count = 0
+
         with ThreadPoolExecutor(
             max_workers=self.settings.PARALLEL_PROCESSES
         ) as executor:
-            results_iterator = executor.map(worker_sities, tasks)
-            self._process_results(
-                results_iterator,
-                start_index,
-                total_tasks,
-                csv_path
-            )
-    
+            future_to_task = {
+                executor.submit(worker_sities, task): (i + resume_index, task)
+                for i, task in enumerate(tasks)
+            }
+
+            for future in as_completed(future_to_task):
+                if shutdown_event.is_set():
+                    break
+
+                current_index, task_info = future_to_task[future]
+                try:
+                    result = future.result(timeout=600)
+                    self._handle_result(result)
+                    # Guardar progreso después de un manejo exitoso
+                    self.data_handler.save_progress(
+                        'sities', os.path.basename(csv_path), current_index
+                    )
+                except Exception as exc:
+                    print(
+                        f"\n[ERROR] Tarea para {task_info['municipio']} "
+                        f"(índice {current_index}) falló: {exc}"
+                    )
+                finally:
+                    completed_count += 1
+                    print_progress(
+                        completed_count, total_tasks, "Procesando"
+                    )
+
     def _load_initial_data(self) -> None:
-        """Carga los datos existentes y muestra estadísticas."""
+        """Carga datos iniciales de MongoDB."""
         self.data_handler.load_data_sities()
-        stats = self.data_handler.get_statistics()
-        total_sites = stats.get('sites_stats', {}).get('total_sites', 0)
-        print(f"[INFO] Sitios existentes en MongoDB: {total_sites}")
-    
+
     def _get_resume_index(self, csv_path: str, start_index: int) -> int:
-        """Determina el índice de inicio considerando progreso guardado."""
-        progress = self.data_handler.load_progress('sities_fetcher', csv_path)
-        
-        if progress and progress.get("csv_path") == csv_path:
-            resume_index = progress.get("idx_actual", -1) + 1
-            if resume_index > start_index:
-                print(f"[INFO] Reanudando desde el índice {resume_index}")
-                return resume_index
-        
+        """
+        Obtiene el índice desde donde reanudar, usando el nombre del archivo
+        como clave única para la persistencia.
+        """
+        csv_filename = os.path.basename(csv_path)
+        progress = self.data_handler.load_progress('sities', csv_filename)
+
+        if progress and progress.get('idx_actual') is not None:
+            resume_idx = progress['idx_actual'] + 1
+            if resume_idx > start_index:
+                print(f"[RESUME] Reanudando desde el índice {resume_idx}")
+                return resume_idx
         print(f"[INFO] Iniciando desde el índice {start_index}")
         return start_index
-    
-    def _process_results(
-        self,
-        results_iterator: Iterator[Dict[str, Any]],
-        start_index: int,
-        total_tasks: int,
-        csv_path: str
-    ) -> None:
-        """Procesa los resultados del scraping."""
-        for i, result in enumerate(results_iterator):
-            if shutdown_event.is_set():
-                print("[INFO] Deteniendo procesamiento de resultados.")
-                break
-            
-            current_index_in_df = start_index + i
-            print_progress(i + 1, total_tasks, "Procesando municipios")
-            self._handle_result(result)
-            self.data_handler.save_progress(
-                'sities_fetcher',
-                csv_path,
-                current_index_in_df
-            )
-    
+
     def _handle_result(self, result: Dict[str, Any]) -> None:
         """Maneja el resultado de una tarea individual."""
         status = result.get("status")
         municipio = result.get("municipio")
         departamento = result.get("departamento")
-        sites_found = result.get("sites", [])
-        
-        if status == "success" and sites_found:
-            stats = self.data_handler.add_sites(municipio, departamento, sites_found)
+        sites = result.get("sites", [])
+
+        if status == "success" and sites:
+            stats = self.data_handler.add_sites(municipio, departamento, sites)
             print(
-                f"\n[INFO] Municipio {municipio}: "
-                f"{stats['new_sites']} sitios nuevos, "
-                f"{stats['duplicates_omitted']} duplicados omitidos. "
-                f"Total: {stats['total_items']}."
+                f"\n[DB] {municipio}: {stats['new_sites']} nuevos, "
+                f"{stats['duplicates_omitted']} duplicados."
             )
         elif status == "no_results":
-            print(f"\n[INFO] Municipio {municipio}: Sin resultados.")
-        elif status == "generic_error":
-            print(f"\n[BLOCK] Municipio {municipio}: Bloqueado.")
-            if not os.path.exists(self.settings.STOP_FILE_PATH):
-                with open(self.settings.STOP_FILE_PATH, 'w') as f:
-                    f.write(f"Block detected at {current_timestamp()}")
+            print(f"\n[INFO] {municipio}: Sin resultados.")
         else:
-            print(f"\n[WARN] Tarea fallida para {municipio}: {status}")
-    
+            print(f"\n[WARN] {municipio}: Tarea finalizada con estado '{status}'.")
+
     def _finalize_data(self) -> None:
-        """Finaliza el proceso y muestra estadísticas."""
-        print("\n[INFO] Finalizando proceso de scraping.")
-        stats = self.data_handler.get_statistics()
-        total_sites = stats.get('sites_stats', {}).get('total_sites', 0)
-        print(
-            f"Proceso finalizado. "
-            f"Total de sitios únicos en MongoDB: {total_sites}"
-        )
-        MongoDBConfig.close_connection()
+        """Finaliza y guarda datos pendientes."""
+        print("\n[FINALIZE] Finalizando proceso y actualizando estadísticas.")
+        self.data_handler.refresh_stats()
 
 
 def main() -> None:
@@ -213,26 +170,26 @@ def main() -> None:
         description='Scraper de Sitios Turísticos con MongoDB Atlas'
     )
     parser.add_argument(
-        '--csv',
-        required=True,
+        '--csv', required=True,
         help='Ruta al archivo CSV o directorio con archivos CSV.'
     )
     parser.add_argument(
-        '--start',
-        type=int,
-        default=0,
-        help='Índice de inicio en cada CSV.'
+        '--start', type=int, default=0, help='Índice de inicio.'
     )
     parser.add_argument(
-        '--end',
-        type=int,
-        default=None,
-        help='Índice de fin en cada CSV.'
+        '--end', type=int, default=None, help='Índice final (opcional).'
     )
     args = parser.parse_args()
-    
-    app = SitiesFetcher()
-    app.run(csv_path=args.csv, start_index=args.start, end_index=args.end)
+
+    try:
+        fetcher = SitiesFetcher()
+        fetcher.run(
+            csv_path=args.csv, start_index=args.start, end_index=args.end
+        )
+    except KeyboardInterrupt:
+        print("\n[INTERRUPTED] Proceso interrumpido por el usuario.")
+    except Exception as e:
+        print(f"\n[FATAL] Error no controlado: {e}")
 
 
 if __name__ == "__main__":
